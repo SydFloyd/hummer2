@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hummer Audio-to-MIDI Tester</title>
+  <link rel="icon" type="image/png" sizes="32x32" href="assets/hummer_logo_32.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="app-shell">
+    <header class="app-header panel">
+      <img src="assets/hummer_logo.png" alt="Hummer logo" class="logo">
+      <div>
+        <h1>Audio-to-MIDI Tester</h1>
+        <p>Record a hum, inspect signal features, and audition derived notes.</p>
+      </div>
+    </header>
+
+    <section class="panel controls">
+      <div class="button-row">
+        <button id="startBtn">Start Recording</button>
+        <button id="stopBtn" disabled>Stop Recording</button>
+        <button id="playRawBendBtn" disabled>Play Raw + Bend</button>
+        <button id="playRawBtn" disabled>Play Raw Pitch</button>
+        <button id="playAutoBtn" disabled>Play Autotuned</button>
+        <button id="playScaleBtn">Play Scale</button>
+      </div>
+
+      <div class="control-grid">
+        <label>
+          Gate Multiplier
+          <input id="gateMultiplier" type="range" min="1.2" max="6" step="0.1" value="2.5">
+          <span id="gateMultiplierValue">2.5x</span>
+        </label>
+        <label>
+          Min Note Length (ms)
+          <input id="minNoteMs" type="range" min="20" max="300" step="5" value="20">
+          <span id="minNoteMsValue">20</span>
+        </label>
+        <label>
+          Note Derivation
+          <select id="noteDerivation">
+            <option value="mean">Mean</option>
+            <option value="median" selected>Median</option>
+          </select>
+        </label>
+        <label>
+          Bend Smoothing
+          <input id="bendSmoothing" type="range" min="0" max="100" step="1" value="35">
+          <span id="bendSmoothingValue">35%</span>
+        </label>
+        <label class="scale-root-label">
+          Scale Root
+          <select id="scaleRoot"></select>
+        </label>
+        <label>
+          Scale Mode
+          <select id="scaleMode"></select>
+        </label>
+      </div>
+    </section>
+
+    <section class="panel status-panel">
+      <div id="statusText">Idle. Press Start Recording.</div>
+      <div class="stats">
+        <span>Duration: <strong id="durationValue">-</strong></span>
+        <span>Noise Floor RMS: <strong id="noiseFloorValue">-</strong></span>
+        <span>Gate Threshold RMS: <strong id="thresholdValue">-</strong></span>
+        <span>Notes: <strong id="noteCountValue">0</strong></span>
+        <span>Scale: <strong id="scaleInfoValue">Auto</strong></span>
+      </div>
+    </section>
+
+    <section class="panel viz-panel">
+      <h2>Derived MIDI Timeline</h2>
+      <canvas id="midiCanvas" width="1200" height="260"></canvas>
+    </section>
+
+    <section class="panel viz-panel">
+      <h2>Waveform + RMS Envelope</h2>
+      <canvas id="waveCanvas" width="1200" height="260"></canvas>
+    </section>
+
+    <section class="panel viz-panel">
+      <h2>Spectrogram + F0 Track</h2>
+      <canvas id="specCanvas" width="1200" height="340"></canvas>
+    </section>
+
+    <section class="panel table-panel">
+      <h2>Derived Notes</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Start (s)</th>
+            <th>End (s)</th>
+            <th>Dur (ms)</th>
+            <th>Raw Pitch</th>
+            <th>Autotuned</th>
+          </tr>
+        </thead>
+        <tbody id="notesBody"></tbody>
+      </table>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
