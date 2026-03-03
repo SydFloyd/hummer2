@@ -115,8 +115,9 @@ button:disabled {
 .control-grid {
   margin-top: 0.9rem;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  grid-template-columns: repeat(7, minmax(90px, 1fr));
   gap: 0.75rem;
+  align-items: start;
 }
 
 label {
@@ -124,6 +125,7 @@ label {
   gap: 0.35rem;
   font-size: 0.86rem;
   color: var(--ink-muted);
+  min-width: 0;
 }
 
 label.inline {
@@ -133,26 +135,34 @@ label.inline {
   color: var(--ink);
 }
 
+.playback-toggle {
+  font-size: 0.84rem;
+  white-space: nowrap;
+}
+
+input[type="checkbox"] {
+  accent-color: var(--accent);
+}
+
 input[type="range"] {
   width: 100%;
   accent-color: var(--accent);
 }
 
 #noteDerivation {
-  width: 11ch;
-  min-width: 11ch;
+  width: 100%;
+  min-width: 0;
 }
 
 #scaleRoot {
-  width: 8ch;
-  min-width: 8ch;
-  justify-self: end;
-  margin-left: auto;
+  width: 100%;
+  min-width: 0;
 }
 
-.scale-root-label {
-  justify-items: end;
-  text-align: right;
+#scaleMode {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
 }
 
 .status-panel {
@@ -221,7 +231,7 @@ tbody td {
   }
 
   .control-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(140px, 1fr));
     gap: 0.75rem;
   }
 }

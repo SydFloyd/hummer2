@@ -22,6 +22,7 @@ const APP_CONFIG = {
   controls: {
     gateMultiplier: { min: 1.2, max: 6, step: 0.1, defaultValue: 2.5 },
     minNoteMs: { min: 20, max: 300, step: 5, defaultValue: 25 },
+    pitchJumpSplit: { min: 0, max: 6, step: 0.1, defaultValue: 0.6 },
     bendSmoothing: { min: 0, max: 100, step: 1, defaultValue: 35 }
   },
   pitch: {
@@ -46,13 +47,21 @@ const APP_CONFIG = {
     noiseQuietMinFrames: 4,
     endHoldFrames: 1,
     pitchRecoverySearchRadius: 4,
-    rawPitchReducer: "median"
+    rawPitchReducer: "mean",
+    pitchJumpConfirmFrames: 2,
+    pitchJumpReferenceFrames: 6,
+    pitchJumpMinFramesBetweenSplits: 3
   },
   autotune: {
     defaultRoot: 0,
     defaultModeId: "auto",
     autoMinVoicedFrames: 8,
-    complexityPenaltyPerExtraDegree: 0.008
+    complexityPenaltyPerExtraDegree: 0.008,
+    outOfScalePenaltyWeight: 1.2,
+    tonicBiasWeight: 0.35,
+    dominantBiasWeight: 0.1,
+    cadenceBiasWeight: 0.45,
+    confidenceMarginScale: 0.4
   },
   playback: {
     rawBend: {
@@ -94,10 +103,13 @@ const els = {
   playRawBtn: document.getElementById("playRawBtn"),
   playAutoBtn: document.getElementById("playAutoBtn"),
   playScaleBtn: document.getElementById("playScaleBtn"),
+  continuousDynamics: document.getElementById("continuousDynamics"),
   gateMultiplier: document.getElementById("gateMultiplier"),
   gateMultiplierValue: document.getElementById("gateMultiplierValue"),
   minNoteMs: document.getElementById("minNoteMs"),
   minNoteMsValue: document.getElementById("minNoteMsValue"),
+  pitchJumpSplit: document.getElementById("pitchJumpSplit"),
+  pitchJumpSplitValue: document.getElementById("pitchJumpSplitValue"),
   bendSmoothing: document.getElementById("bendSmoothing"),
   bendSmoothingValue: document.getElementById("bendSmoothingValue"),
   noteDerivation: document.getElementById("noteDerivation"),
@@ -130,6 +142,7 @@ function bootstrap() {
 function applyControlConfig() {
   applyRangeConfig(els.gateMultiplier, APP_CONFIG.controls.gateMultiplier);
   applyRangeConfig(els.minNoteMs, APP_CONFIG.controls.minNoteMs);
+  applyRangeConfig(els.pitchJumpSplit, APP_CONFIG.controls.pitchJumpSplit);
   applyRangeConfig(els.bendSmoothing, APP_CONFIG.controls.bendSmoothing);
   els.noteDerivation.value = APP_CONFIG.detection.rawPitchReducer;
 }
@@ -181,6 +194,10 @@ function wireEvents() {
     syncControlLabels();
     rerunDerivation();
   });
+  els.pitchJumpSplit.addEventListener("input", () => {
+    syncControlLabels();
+    rerunDerivation();
+  });
   els.bendSmoothing.addEventListener("input", syncControlLabels);
   els.noteDerivation.addEventListener("change", rerunDerivation);
   els.scaleRoot.addEventListener("change", rerunDerivation);
@@ -193,6 +210,7 @@ function wireEvents() {
 function syncControlLabels() {
   els.gateMultiplierValue.textContent = `${Number(els.gateMultiplier.value).toFixed(1)}x`;
   els.minNoteMsValue.textContent = String(Number(els.minNoteMs.value));
+  els.pitchJumpSplitValue.textContent = Number(els.pitchJumpSplit.value).toFixed(1);
   els.bendSmoothingValue.textContent = `${Math.round(Number(els.bendSmoothing.value))}%`;
 }
 
@@ -282,9 +300,19 @@ function rerunDerivation() {
   state.autotuneConfig = readAutotuneConfigFromUi();
   const gateMultiplier = Number(els.gateMultiplier.value);
   const minNoteMs = Number(els.minNoteMs.value);
+  const pitchJumpSplitSemitones = Number(els.pitchJumpSplit.value);
   const threshold = state.analysis.noiseFloor * gateMultiplier + APP_CONFIG.detection.gateOffset;
-  const rawNotes = deriveRawNotes(state.analysis, threshold, minNoteMs, els.noteDerivation.value);
-  const resolvedScale = resolveAutotuneScale(state.analysis, threshold, state.autotuneConfig);
+  const rawNotes = deriveRawNotes(
+    state.analysis,
+    threshold,
+    minNoteMs,
+    els.noteDerivation.value,
+    pitchJumpSplitSemitones
+  );
+  const resolvedScale = resolveAutotuneScale(state.analysis, threshold, state.autotuneConfig, rawNotes);
+  if (state.autotuneConfig.modeId === "auto") {
+    els.scaleRoot.value = String(resolvedScale.keyRoot);
+  }
   const autoNotes = deriveAutotunedNotes(rawNotes, resolvedScale.keyRoot, resolvedScale.modeId);
 
   state.derived = {
@@ -314,7 +342,7 @@ function readAutotuneConfigFromUi() {
   return { keyRoot, modeId };
 }
 
-function resolveAutotuneScale(analysis, threshold, autotuneConfig) {
+function resolveAutotuneScale(analysis, threshold, autotuneConfig, rawNotes) {
   if (autotuneConfig.modeId !== "auto") {
     return {
       keyRoot: autotuneConfig.keyRoot,
@@ -323,10 +351,10 @@ function resolveAutotuneScale(analysis, threshold, autotuneConfig) {
       confidence: 1
     };
   }
-  return detectBestScaleFromFrames(analysis, threshold);
+  return detectBestScaleFromFrames(analysis, threshold, rawNotes);
 }
 
-function detectBestScaleFromFrames(analysis, threshold) {
+function detectBestScaleFromFrames(analysis, threshold, rawNotes) {
   const voicedFrames = [];
   for (let i = 0; i < analysis.frameTimes.length; i++) {
     const midiValue = analysis.midiFrames[i];
@@ -348,31 +376,121 @@ function detectBestScaleFromFrames(analysis, threshold) {
     };
   }
 
+  const pitchClassHistogram = buildPitchClassHistogram(voicedFrames);
+  const cadenceProfile = buildCadenceProfile(rawNotes);
+
   let best = {
     keyRoot: APP_CONFIG.autotune.defaultRoot,
     modeId: "major",
     score: Number.POSITIVE_INFINITY
   };
+  let secondBestScore = Number.POSITIVE_INFINITY;
 
   for (let root = 0; root < NOTE_NAMES.length; root++) {
     for (const modeId of AUTO_DETECT_MODE_IDS) {
       const mode = SCALE_BY_ID[modeId];
       const fitError = scaleFitError(voicedFrames, root, mode.intervals);
+      const outOfScaleRatio = computeOutOfScaleRatio(pitchClassHistogram, root, mode.intervals);
+      const tonicAffinity = computePitchClassAffinity(pitchClassHistogram, root);
+      const dominantAffinity = computePitchClassAffinity(pitchClassHistogram, (root + 7) % 12);
+      const cadenceAffinity = computeCadenceAffinity(cadenceProfile, root);
       const complexityPenalty = Math.max(0, mode.intervals.length - 7) * APP_CONFIG.autotune.complexityPenaltyPerExtraDegree;
-      const score = fitError + complexityPenalty;
+      const score =
+        fitError +
+        outOfScaleRatio * APP_CONFIG.autotune.outOfScalePenaltyWeight +
+        complexityPenalty -
+        tonicAffinity * APP_CONFIG.autotune.tonicBiasWeight -
+        dominantAffinity * APP_CONFIG.autotune.dominantBiasWeight -
+        cadenceAffinity * APP_CONFIG.autotune.cadenceBiasWeight;
       if (score < best.score) {
+        secondBestScore = best.score;
         best = { keyRoot: root, modeId, score };
+      } else if (score < secondBestScore) {
+        secondBestScore = score;
       }
     }
   }
 
-  const confidence = 1 / (1 + best.score);
+  const baseConfidence = 1 / (1 + Math.max(0, best.score));
+  const scoreMargin = secondBestScore - best.score;
+  const marginConfidence = clamp(scoreMargin / APP_CONFIG.autotune.confidenceMarginScale, 0, 1);
+  const confidence = clamp(baseConfidence * 0.4 + marginConfidence * 0.6, 0, 1);
   return {
     keyRoot: best.keyRoot,
     modeId: best.modeId,
     source: "auto",
     confidence
   };
+}
+
+function buildPitchClassHistogram(voicedFrames) {
+  const bins = new Array(12).fill(0);
+  let total = 0;
+  for (const frame of voicedFrames) {
+    const pitchClass = positiveModulo(Math.round(frame.midi), 12);
+    bins[pitchClass] += frame.weight;
+    total += frame.weight;
+  }
+  if (total <= 0) {
+    return bins;
+  }
+  for (let i = 0; i < bins.length; i++) {
+    bins[i] /= total;
+  }
+  return bins;
+}
+
+function computeOutOfScaleRatio(histogram, keyRoot, intervals) {
+  const inScale = new Set(intervals.map((step) => positiveModulo(keyRoot + step, 12)));
+  let out = 0;
+  for (let pitchClass = 0; pitchClass < 12; pitchClass++) {
+    if (!inScale.has(pitchClass)) {
+      out += histogram[pitchClass];
+    }
+  }
+  return out;
+}
+
+function computePitchClassAffinity(histogram, pitchClass) {
+  return histogram[positiveModulo(pitchClass, 12)] || 0;
+}
+
+function buildCadenceProfile(rawNotes) {
+  if (!rawNotes || !rawNotes.length) {
+    return null;
+  }
+  const first = rawNotes[0];
+  const last = rawNotes[rawNotes.length - 1];
+  const endWeights = new Array(12).fill(0);
+  let endTotal = 0;
+  const windowCount = Math.min(3, rawNotes.length);
+  for (let i = rawNotes.length - windowCount; i < rawNotes.length; i++) {
+    const note = rawNotes[i];
+    const pitchClass = positiveModulo(Math.round(note.rawMidi), 12);
+    const weight = Math.max(0.05, note.end - note.start);
+    endWeights[pitchClass] += weight;
+    endTotal += weight;
+  }
+  if (endTotal > 0) {
+    for (let i = 0; i < endWeights.length; i++) {
+      endWeights[i] /= endTotal;
+    }
+  }
+  return {
+    firstPc: positiveModulo(Math.round(first.rawMidi), 12),
+    finalPc: positiveModulo(Math.round(last.rawMidi), 12),
+    endWeights
+  };
+}
+
+function computeCadenceAffinity(cadenceProfile, keyRoot) {
+  if (!cadenceProfile) {
+    return 0;
+  }
+  const startCloseness = 1 - pitchClassDistance(cadenceProfile.firstPc, keyRoot) / 6;
+  const finalCloseness = 1 - pitchClassDistance(cadenceProfile.finalPc, keyRoot) / 6;
+  const endClusterAffinity = cadenceProfile.endWeights[positiveModulo(keyRoot, 12)] || 0;
+  return startCloseness * 0.15 + finalCloseness * 0.6 + endClusterAffinity * 0.25;
 }
 
 function scaleFitError(voicedFrames, keyRoot, intervals) {
@@ -399,6 +517,11 @@ function semitoneDistanceToScale(midiValue, keyRoot, intervals) {
     }
   }
   return best;
+}
+
+function pitchClassDistance(pcA, pcB) {
+  const diff = Math.abs(positiveModulo(pcA - pcB, 12));
+  return Math.min(diff, 12 - diff);
 }
 
 function analyzeAudio(samples, sampleRate) {
@@ -456,40 +579,26 @@ function detectNoiseFloor(rmsFrames) {
   return sum / quietCount;
 }
 
-function deriveRawNotes(analysis, threshold, minNoteMs, pitchReducer) {
+function deriveRawNotes(analysis, threshold, minNoteMs, pitchReducer, pitchJumpSplitSemitones) {
   const notes = [];
   const endHoldFrames = APP_CONFIG.detection.endHoldFrames;
   let active = false;
   let startIndex = -1;
   let endHold = 0;
-  let pitchPool = [];
 
   const flushNote = (endIndex) => {
     if (startIndex < 0 || endIndex < startIndex) {
       return;
     }
-    const framePad = analysis.hopSize / analysis.sampleRate;
-    const start = Math.max(0, analysis.frameTimes[startIndex] - framePad);
-    const end = Math.min(analysis.duration, analysis.frameTimes[endIndex] + framePad);
-    const durationMs = (end - start) * 1000;
-    if (durationMs < minNoteMs) {
-      return;
-    }
-    const rawMidi = pitchPool.length
-      ? reducePitchPool(pitchPool, pitchReducer || APP_CONFIG.detection.rawPitchReducer)
-      : recoverSegmentMidi(analysis, startIndex, endIndex);
-    if (!Number.isFinite(rawMidi)) {
-      return;
-    }
-    const clampedRawMidi = clampPitchMidi(rawMidi);
-    notes.push({
-      start,
-      end,
-      rawMidi: clampedRawMidi,
-      midi: clampedRawMidi,
-      frameStart: startIndex,
-      frameEnd: endIndex
-    });
+    const segmentNotes = splitGatedSegmentIntoNotes(
+      analysis,
+      startIndex,
+      endIndex,
+      minNoteMs,
+      pitchReducer,
+      pitchJumpSplitSemitones
+    );
+    notes.push(...segmentNotes);
   };
 
   for (let i = 0; i < analysis.frameTimes.length; i++) {
@@ -499,10 +608,6 @@ function deriveRawNotes(analysis, threshold, minNoteMs, pitchReducer) {
         active = true;
         startIndex = i;
         endHold = 0;
-        pitchPool = [];
-      }
-      if (Number.isFinite(analysis.midiFrames[i])) {
-        pitchPool.push(analysis.midiFrames[i]);
       }
       endHold = 0;
     } else if (active) {
@@ -513,7 +618,6 @@ function deriveRawNotes(analysis, threshold, minNoteMs, pitchReducer) {
         active = false;
         startIndex = -1;
         endHold = 0;
-        pitchPool = [];
       }
     }
   }
@@ -522,6 +626,143 @@ function deriveRawNotes(analysis, threshold, minNoteMs, pitchReducer) {
     flushNote(analysis.frameTimes.length - 1);
   }
   return notes;
+}
+
+function splitGatedSegmentIntoNotes(
+  analysis,
+  frameStart,
+  frameEnd,
+  minNoteMs,
+  pitchReducer,
+  pitchJumpSplitSemitones
+) {
+  const boundaries = detectPitchJumpBoundaries(analysis, frameStart, frameEnd, pitchJumpSplitSemitones);
+  if (!boundaries.length) {
+    const single = buildNoteFromFrameRange(analysis, frameStart, frameEnd, minNoteMs, pitchReducer);
+    return single ? [single] : [];
+  }
+
+  const notes = [];
+  let segmentStart = frameStart;
+  for (const boundary of boundaries) {
+    const segmentEnd = boundary - 1;
+    if (segmentEnd >= segmentStart) {
+      const note = buildNoteFromFrameRange(analysis, segmentStart, segmentEnd, minNoteMs, pitchReducer);
+      if (note) {
+        notes.push(note);
+      }
+    }
+    segmentStart = boundary;
+  }
+
+  if (segmentStart <= frameEnd) {
+    const note = buildNoteFromFrameRange(analysis, segmentStart, frameEnd, minNoteMs, pitchReducer);
+    if (note) {
+      notes.push(note);
+    }
+  }
+  return notes;
+}
+
+function detectPitchJumpBoundaries(analysis, frameStart, frameEnd, splitSemitones) {
+  const threshold = Number(splitSemitones) || 0;
+  if (threshold <= 0) {
+    return [];
+  }
+
+  const boundaries = [];
+  const referenceWindow = APP_CONFIG.detection.pitchJumpReferenceFrames;
+  const confirmFrames = APP_CONFIG.detection.pitchJumpConfirmFrames;
+  const minFramesBetweenSplits = APP_CONFIG.detection.pitchJumpMinFramesBetweenSplits;
+
+  let recent = [];
+  let exceedCount = 0;
+  let candidateStart = -1;
+  let lastBoundary = frameStart;
+
+  for (let i = frameStart; i <= frameEnd; i++) {
+    const midi = analysis.midiFrames[i];
+    if (!Number.isFinite(midi)) {
+      continue;
+    }
+
+    if (recent.length < Math.max(2, Math.floor(referenceWindow / 2))) {
+      recent.push(midi);
+      if (recent.length > referenceWindow) {
+        recent.shift();
+      }
+      exceedCount = 0;
+      candidateStart = -1;
+      continue;
+    }
+
+    const referenceMidi = mean(recent);
+    const deviation = Math.abs(midi - referenceMidi);
+    if (deviation >= threshold) {
+      if (candidateStart < 0) {
+        candidateStart = i;
+      }
+      exceedCount += 1;
+      if (exceedCount >= confirmFrames) {
+        const boundaryFrame = candidateStart;
+        if (boundaryFrame - lastBoundary >= minFramesBetweenSplits) {
+          boundaries.push(boundaryFrame);
+          lastBoundary = boundaryFrame;
+          recent = [midi];
+          exceedCount = 0;
+          candidateStart = -1;
+          continue;
+        }
+      }
+    } else {
+      exceedCount = 0;
+      candidateStart = -1;
+    }
+
+    recent.push(midi);
+    if (recent.length > referenceWindow) {
+      recent.shift();
+    }
+  }
+  return boundaries;
+}
+
+function buildNoteFromFrameRange(analysis, frameStart, frameEnd, minNoteMs, pitchReducer) {
+  if (frameEnd < frameStart) {
+    return null;
+  }
+
+  const framePad = analysis.hopSize / analysis.sampleRate;
+  const start = Math.max(0, analysis.frameTimes[frameStart] - framePad);
+  const end = Math.min(analysis.duration, analysis.frameTimes[frameEnd] + framePad);
+  const durationMs = (end - start) * 1000;
+  if (durationMs < minNoteMs) {
+    return null;
+  }
+
+  const pitchPool = [];
+  for (let i = frameStart; i <= frameEnd; i++) {
+    if (Number.isFinite(analysis.midiFrames[i])) {
+      pitchPool.push(analysis.midiFrames[i]);
+    }
+  }
+
+  const rawMidi = pitchPool.length
+    ? reducePitchPool(pitchPool, pitchReducer || APP_CONFIG.detection.rawPitchReducer)
+    : recoverSegmentMidi(analysis, frameStart, frameEnd);
+  if (!Number.isFinite(rawMidi)) {
+    return null;
+  }
+
+  const clampedRawMidi = clampPitchMidi(rawMidi);
+  return {
+    start,
+    end,
+    rawMidi: clampedRawMidi,
+    midi: clampedRawMidi,
+    frameStart,
+    frameEnd
+  };
 }
 
 function recoverSegmentMidi(analysis, frameStart, frameEnd) {
@@ -1040,7 +1281,12 @@ function updateScaleInfo(resolvedScale) {
     return;
   }
   const label = formatScaleName(resolvedScale.keyRoot, resolvedScale.modeId);
-  els.scaleInfoValue.textContent = resolvedScale.source === "auto" ? `Auto: ${label}` : label;
+  if (resolvedScale.source === "auto") {
+    const confidenceText = `${Math.round((resolvedScale.confidence || 0) * 100)}%`;
+    els.scaleInfoValue.textContent = `Auto: ${label} (${confidenceText})`;
+  } else {
+    els.scaleInfoValue.textContent = label;
+  }
 }
 
 function formatScaleName(keyRoot, modeId) {
@@ -1082,13 +1328,34 @@ function hasBendPlayableData() {
   return false;
 }
 
+function isContinuousDynamicsEnabled() {
+  return Boolean(els.continuousDynamics && els.continuousDynamics.checked);
+}
+
 function playNotes(mode) {
-  if (!state.derived) {
+  if (!state.derived || !state.analysis) {
     return;
   }
   const notes = mode === "raw" ? state.derived.rawNotes : state.derived.autoNotes;
   if (!notes.length) {
     setStatus("No notes available for playback.");
+    return;
+  }
+  if (isContinuousDynamicsEnabled()) {
+    const smoothingAmount = clamp((Number(els.bendSmoothing.value) || 0) / 100, 0, 1);
+    const segments = buildNoteDrivenContinuousSegments(
+      state.analysis,
+      notes,
+      mode,
+      smoothingAmount
+    );
+    const played = playContinuousSegments(segments);
+    if (!played) {
+      setStatus("No voiced frames available for continuous playback.");
+      return;
+    }
+    const modeLabel = mode === "raw" ? "raw vocal pitch" : "autotuned note sequence";
+    setStatus(`Playing ${modeLabel} with original amplitude envelope...`);
     return;
   }
 
@@ -1131,26 +1398,12 @@ function playRawBend() {
     setStatus("No bend-capable raw frames available.");
     return;
   }
-
-  stopPlayback();
-  const ctx = createAudioContext();
-  state.playbackContext = ctx;
-  const master = createPlaybackChain(ctx);
-
-  const startAt = ctx.currentTime + 0.05;
-  let maxEnd = 0;
-  for (const segment of segments) {
-    triggerBendVoice(ctx, segment, startAt, master);
-    maxEnd = Math.max(maxEnd, startAt + segment.endTime);
-  }
-
-  const totalMs = Math.max(200, (maxEnd - ctx.currentTime) * 1000);
-  state.playbackEndTimer = setTimeout(() => {
-    stopPlayback();
-    setStatus("Playback complete.");
-  }, totalMs + 120);
-
   const gravityLabel = scaleForGravity ? formatScaleName(scaleForGravity.keyRoot, scaleForGravity.modeId) : "off";
+  const played = playContinuousSegments(segments);
+  if (!played) {
+    setStatus("No bend-capable raw frames available.");
+    return;
+  }
   setStatus(`Playing raw pitch + bend (${Math.round(smoothingAmount * 100)}% smooth, gravity ${gravityLabel})...`);
 }
 
@@ -1263,6 +1516,31 @@ function stopPlayback() {
   state.playbackContext = null;
 }
 
+function playContinuousSegments(segments) {
+  if (!segments || !segments.length) {
+    return false;
+  }
+
+  stopPlayback();
+  const ctx = createAudioContext();
+  state.playbackContext = ctx;
+  const master = createPlaybackChain(ctx);
+
+  const startAt = ctx.currentTime + 0.05;
+  let maxEnd = 0;
+  for (const segment of segments) {
+    triggerBendVoice(ctx, segment, startAt, master);
+    maxEnd = Math.max(maxEnd, startAt + segment.endTime);
+  }
+
+  const totalMs = Math.max(200, (maxEnd - ctx.currentTime) * 1000);
+  state.playbackEndTimer = setTimeout(() => {
+    stopPlayback();
+    setStatus("Playback complete.");
+  }, totalMs + 120);
+  return true;
+}
+
 function createPlaybackChain(ctx) {
   const master = ctx.createGain();
   master.gain.value = 0.95;
@@ -1311,6 +1589,95 @@ function triggerSynthVoice(ctx, freqHz, start, end, destination, mode) {
   body.start(start);
   bright.stop(end + 0.06);
   body.stop(end + 0.06);
+}
+
+function buildNoteDrivenContinuousSegments(analysis, notes, mode, smoothingAmount) {
+  const frameCount = analysis.frameTimes.length;
+  if (!frameCount || !notes.length) {
+    return [];
+  }
+
+  const midiTrack = new Array(frameCount).fill(null);
+  for (const note of notes) {
+    const midiValue = mode === "raw" ? note.rawMidi : note.midi;
+    if (!Number.isFinite(midiValue)) {
+      continue;
+    }
+    const startFrame = resolveNoteFrameStart(analysis, note, frameCount);
+    const endFrame = resolveNoteFrameEnd(analysis, note, frameCount);
+    const from = Math.min(startFrame, endFrame);
+    const to = Math.max(startFrame, endFrame);
+    for (let i = from; i <= to; i++) {
+      midiTrack[i] = clampPitchMidi(midiValue);
+    }
+  }
+
+  const validMask = midiTrack.map((value) => Number.isFinite(value));
+  const smoothedMidiTrack = smoothScalarTrackBidirectional(midiTrack, validMask, smoothingAmount * 0.35);
+  const voicedMask = smoothedMidiTrack.map((value) => Number.isFinite(value));
+
+  const voicedRms = [];
+  for (let i = 0; i < frameCount; i++) {
+    if (voicedMask[i]) {
+      voicedRms.push(analysis.rmsFrames[i]);
+    }
+  }
+  const rmsReference = Math.max(1e-6, percentile(voicedRms, 0.95));
+  const gainTrack = new Array(frameCount).fill(0);
+  for (let i = 0; i < frameCount; i++) {
+    if (!voicedMask[i]) {
+      continue;
+    }
+    const normalized = clamp(analysis.rmsFrames[i] / rmsReference, 0, 1);
+    gainTrack[i] = Math.pow(normalized, APP_CONFIG.playback.rawBend.gainPower) * APP_CONFIG.playback.rawBend.maxGain;
+  }
+  const smoothedGainTrack = smoothScalarTrackBidirectional(gainTrack, voicedMask, smoothingAmount * 0.7);
+
+  const segments = [];
+  let segmentStart = -1;
+  const framePad = analysis.hopSize / analysis.sampleRate;
+  for (let i = 0; i < frameCount; i++) {
+    if (voicedMask[i] && segmentStart < 0) {
+      segmentStart = i;
+    } else if (!voicedMask[i] && segmentStart >= 0) {
+      pushBendSegment(segments, analysis, smoothedMidiTrack, smoothedGainTrack, segmentStart, i - 1, framePad);
+      segmentStart = -1;
+    }
+  }
+  if (segmentStart >= 0) {
+    pushBendSegment(segments, analysis, smoothedMidiTrack, smoothedGainTrack, segmentStart, frameCount - 1, framePad);
+  }
+  return segments;
+}
+
+function resolveNoteFrameStart(analysis, note, frameCount) {
+  if (Number.isFinite(note.frameStart)) {
+    return clamp(Math.round(note.frameStart), 0, frameCount - 1);
+  }
+  return findNearestFrameIndex(analysis.frameTimes, note.start);
+}
+
+function resolveNoteFrameEnd(analysis, note, frameCount) {
+  if (Number.isFinite(note.frameEnd)) {
+    return clamp(Math.round(note.frameEnd), 0, frameCount - 1);
+  }
+  return findNearestFrameIndex(analysis.frameTimes, note.end);
+}
+
+function findNearestFrameIndex(frameTimes, targetTime) {
+  if (!frameTimes.length) {
+    return 0;
+  }
+  let bestIndex = 0;
+  let bestDistance = Math.abs(frameTimes[0] - targetTime);
+  for (let i = 1; i < frameTimes.length; i++) {
+    const distance = Math.abs(frameTimes[i] - targetTime);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestIndex = i;
+    }
+  }
+  return bestIndex;
 }
 
 function buildRawBendSegments(analysis, threshold, options) {
@@ -1630,6 +1997,10 @@ function createAudioContext() {
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
+}
+
+function positiveModulo(value, mod) {
+  return ((value % mod) + mod) % mod;
 }
 
 function clampPitchMidi(midi) {

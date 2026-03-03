@@ -27,6 +27,10 @@
         <button id="playRawBendBtn" disabled>Play Raw + Bend</button>
         <button id="playRawBtn" disabled>Play Raw Pitch</button>
         <button id="playAutoBtn" disabled>Play Autotuned</button>
+        <label class="inline playback-toggle">
+          <input id="continuousDynamics" type="checkbox" checked>
+          Follow Original Amplitude
+        </label>
         <button id="playScaleBtn">Play Scale</button>
       </div>
 
@@ -42,10 +46,15 @@
           <span id="minNoteMsValue">20</span>
         </label>
         <label>
+          Pitch Jump Split (st)
+          <input id="pitchJumpSplit" type="range" min="0" max="6" step="0.1" value="1.2">
+          <span id="pitchJumpSplitValue">1.2</span>
+        </label>
+        <label>
           Note Derivation
           <select id="noteDerivation">
-            <option value="mean">Mean</option>
-            <option value="median" selected>Median</option>
+            <option value="mean" selected>Mean</option>
+            <option value="median">Median</option>
           </select>
         </label>
         <label>
@@ -53,7 +62,7 @@
           <input id="bendSmoothing" type="range" min="0" max="100" step="1" value="35">
           <span id="bendSmoothingValue">35%</span>
         </label>
-        <label class="scale-root-label">
+        <label>
           Scale Root
           <select id="scaleRoot"></select>
         </label>
