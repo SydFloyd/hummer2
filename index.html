@@ -22,114 +22,274 @@
 
     <section class="panel controls">
       <div class="button-row">
-        <button id="startBtn">Start Recording</button>
-        <button id="stopBtn" disabled>Stop Recording</button>
-        <button id="playOriginalBtn" disabled>Play Original</button>
-        <button id="playRawBendBtn" disabled>Play Raw + Bend</button>
-        <button id="playRawBtn" disabled>Play Raw Pitch</button>
-        <button id="playAutoBtn" disabled>Play Autotuned</button>
-        <label class="inline playback-toggle">
-          <input id="continuousDynamics" type="checkbox" checked>
-          Follow Original Amplitude
-        </label>
-        <button id="resetDefaultsBtn" class="icon-reset" type="button" aria-label="Reset defaults" title="Reset defaults">&#x21bb;</button>
+        <button id="startBtn" class="transport-symbol-btn" type="button" aria-label="Start recording" title="Start recording">&#x25cf;</button>
+        <button id="stopBtn" class="transport-symbol-btn" type="button" aria-label="Stop recording" title="Stop recording" disabled>&#x25a0;</button>
+        <button id="loopToggleBtn" class="icon-toggle icon-loop" type="button" aria-label="Toggle loop playback" title="Loop playback">&#x21bb;</button>
+        <button id="playSelectedBtn" class="transport-symbol-btn" type="button" aria-label="Play selected mode" title="Play selected mode" disabled>&#x25b6;</button>
+        <div class="play-mode-group" role="radiogroup" aria-label="Playback mode">
+          <label class="play-mode-option">
+            <input type="radio" name="playMode" value="rawBend" checked>
+            Raw + Bend
+          </label>
+          <label class="play-mode-option">
+            <input type="radio" name="playMode" value="raw">
+            Raw Pitch
+          </label>
+          <label class="play-mode-option">
+            <input type="radio" name="playMode" value="auto">
+            Autotuned
+          </label>
+          <label class="play-mode-option">
+            <input type="radio" name="playMode" value="original">
+            Original
+          </label>
+        </div>
+        <button id="resetDefaultsBtn" class="reset-btn" type="button" aria-label="Reset defaults" title="Reset defaults">Reset</button>
+        <button
+          id="toggleControlsBtn"
+          class="icon-toggle"
+          type="button"
+          aria-label="Expand settings"
+          aria-controls="selectionPanel"
+          aria-expanded="false"
+          title="Expand settings"
+        >&#x25b8;</button>
       </div>
 
-      <div class="control-grid">
-        <label>
-          Gate Multiplier
-          <input id="gateMultiplier" type="range" min="1.2" max="6" step="0.1" value="2.5">
-          <span id="gateMultiplierValue">2.5x</span>
-        </label>
-        <label>
-          Min Note Length (ms)
-          <input id="minNoteMs" type="range" min="20" max="300" step="5" value="20">
-          <span id="minNoteMsValue">20</span>
-        </label>
-        <label>
-          Pitch Jump Split (st)
-          <input id="pitchJumpSplit" type="range" min="0" max="6" step="0.1" value="1.2">
-          <span id="pitchJumpSplitValue">1.2</span>
-        </label>
-        <label>
-          Max Note Jump (st)
-          <input id="maxNoteJump" type="range" min="0" max="24" step="0.5" value="12">
-          <span id="maxNoteJumpValue">12.0</span>
-        </label>
-        <label>
-          Note Derivation
-          <select id="noteDerivation">
-            <option value="mean" selected>Mean</option>
-            <option value="median">Median</option>
-          </select>
-        </label>
-        <label>
-          Bend Smoothing
-          <input id="bendSmoothing" type="range" min="0" max="100" step="1" value="35">
-          <span id="bendSmoothingValue">35%</span>
-        </label>
+      <div id="selectionPanel" class="selection-panel" hidden>
+        <div class="control-grid">
+          <label>
+            Gate Multiplier
+            <input id="gateMultiplier" type="range" min="1.2" max="6" step="0.1" value="2.5">
+            <span id="gateMultiplierValue">2.5x</span>
+          </label>
+          <label>
+            Min Note Length (ms)
+            <input id="minNoteMs" type="range" min="20" max="300" step="5" value="20">
+            <span id="minNoteMsValue">20</span>
+          </label>
+          <label>
+            Pitch Jump Split (st)
+            <input id="pitchJumpSplit" type="range" min="0" max="6" step="0.1" value="1.2">
+            <span id="pitchJumpSplitValue">1.2</span>
+          </label>
+          <label>
+            Max Note Jump (st)
+            <input id="maxNoteJump" type="range" min="0" max="24" step="0.5" value="12">
+            <span id="maxNoteJumpValue">12.0</span>
+          </label>
+          <label>
+            Note Derivation
+            <select id="noteDerivation">
+              <option value="mean" selected>Mean</option>
+              <option value="median">Median</option>
+            </select>
+          </label>
+          <label>
+            Bend Smoothing
+            <input id="bendSmoothing" type="range" min="0" max="100" step="1" value="35">
+            <span id="bendSmoothingValue">35%</span>
+          </label>
+        </div>
+
+        <div class="pitch-detector-grid">
+          <label>
+            Pitch Detector
+            <select id="pitchDetector">
+              <option value="autocorrelation" selected>Autocorrelation</option>
+              <option value="yin">YIN</option>
+              <option value="mpm">MPM (McLeod)</option>
+            </select>
+          </label>
+          <label class="pitch-detector-option" data-detector-option="autocorrelation">
+            Correlation Threshold
+            <input id="autocorrThreshold" type="range" min="0.1" max="0.95" step="0.01" value="0.35">
+            <span id="autocorrThresholdValue">0.35</span>
+          </label>
+          <label class="pitch-detector-option" data-detector-option="autocorrelation">
+            Harmonic Bias
+            <input id="autocorrHarmonicBias" type="range" min="0" max="0.25" step="0.005" value="0.05">
+            <span id="autocorrHarmonicBiasValue">0.05</span>
+          </label>
+          <label class="pitch-detector-option" data-detector-option="yin" hidden>
+            YIN Trough Threshold
+            <input id="yinThreshold" type="range" min="0.05" max="0.35" step="0.01" value="0.14">
+            <span id="yinThresholdValue">0.14</span>
+          </label>
+          <label class="pitch-detector-option" data-detector-option="yin" hidden>
+            YIN Min Clarity
+            <input id="yinClarity" type="range" min="0.05" max="0.95" step="0.01" value="0.20">
+            <span id="yinClarityValue">0.20</span>
+          </label>
+          <label class="pitch-detector-option" data-detector-option="mpm" hidden>
+            NSDF Peak Threshold
+            <input id="mpmThreshold" type="range" min="0.1" max="0.95" step="0.01" value="0.55">
+            <span id="mpmThresholdValue">0.55</span>
+          </label>
+          <label class="pitch-detector-option" data-detector-option="mpm" hidden>
+            MPM Min Clarity
+            <input id="mpmClarity" type="range" min="0.1" max="0.99" step="0.01" value="0.55">
+            <span id="mpmClarityValue">0.55</span>
+          </label>
+          <label class="inline pitch-downsample-toggle">
+            <input id="downsamplePitch" type="checkbox" checked>
+            Downsample (Faster)
+          </label>
+        </div>
+
+        <div class="scale-control-row">
+          <label>
+            Scale Root
+            <select id="scaleRoot"></select>
+          </label>
+          <label>
+            Scale Mode
+            <select id="scaleMode"></select>
+          </label>
+          <button id="playScaleBtn">Play Scale</button>
+        </div>
       </div>
 
-      <div class="pitch-detector-grid">
-        <label>
-          Pitch Detector
-          <select id="pitchDetector">
-            <option value="autocorrelation" selected>Autocorrelation</option>
-            <option value="yin">YIN</option>
-            <option value="mpm">MPM (McLeod)</option>
-          </select>
-        </label>
-        <label class="pitch-detector-option" data-detector-option="autocorrelation">
-          Correlation Threshold
-          <input id="autocorrThreshold" type="range" min="0.1" max="0.95" step="0.01" value="0.35">
-          <span id="autocorrThresholdValue">0.35</span>
-        </label>
-        <label class="pitch-detector-option" data-detector-option="autocorrelation">
-          Harmonic Bias
-          <input id="autocorrHarmonicBias" type="range" min="0" max="0.25" step="0.005" value="0.05">
-          <span id="autocorrHarmonicBiasValue">0.05</span>
-        </label>
-        <label class="pitch-detector-option" data-detector-option="yin" hidden>
-          YIN Trough Threshold
-          <input id="yinThreshold" type="range" min="0.05" max="0.35" step="0.01" value="0.14">
-          <span id="yinThresholdValue">0.14</span>
-        </label>
-        <label class="pitch-detector-option" data-detector-option="yin" hidden>
-          YIN Min Clarity
-          <input id="yinClarity" type="range" min="0.05" max="0.95" step="0.01" value="0.20">
-          <span id="yinClarityValue">0.20</span>
-        </label>
-        <label class="pitch-detector-option" data-detector-option="mpm" hidden>
-          NSDF Peak Threshold
-          <input id="mpmThreshold" type="range" min="0.1" max="0.95" step="0.01" value="0.55">
-          <span id="mpmThresholdValue">0.55</span>
-        </label>
-        <label class="pitch-detector-option" data-detector-option="mpm" hidden>
-          MPM Min Clarity
-          <input id="mpmClarity" type="range" min="0.1" max="0.99" step="0.01" value="0.55">
-          <span id="mpmClarityValue">0.55</span>
-        </label>
-        <label class="inline pitch-downsample-toggle">
-          <input id="downsamplePitch" type="checkbox" checked>
-          Downsample (Faster)
-        </label>
-      </div>
+      <div class="synth-panel">
+        <div class="synth-panel-header">
+          <h3 class="synth-panel-title">Playback Synth</h3>
+          <button
+            id="toggleSynthPanelBtn"
+            class="icon-toggle icon-toggle-secondary"
+            type="button"
+            aria-label="Expand synth settings"
+            aria-controls="synthSelectionPanel"
+            aria-expanded="false"
+            title="Expand synth settings"
+          >&#x25b8;</button>
+        </div>
 
-      <div class="scale-control-row">
-        <label>
-          Scale Root
-          <select id="scaleRoot"></select>
-        </label>
-        <label>
-          Scale Mode
-          <select id="scaleMode"></select>
-        </label>
-        <button id="playScaleBtn">Play Scale</button>
+        <div id="synthSelectionPanel" class="synth-selection-panel" hidden>
+          <div class="synth-row-grid synth-row-voice">
+            <label>
+              Oscillator
+              <select id="synthOscillator">
+                <option value="sawtooth" selected>Sawtooth</option>
+                <option value="square">Square</option>
+                <option value="triangle">Triangle</option>
+                <option value="sine">Sine</option>
+              </select>
+            </label>
+            <label>
+              Voice 2 Detune (cents)
+              <input id="synthVoice2Detune" type="range" min="-40" max="40" step="1" value="8">
+              <span id="synthVoice2DetuneValue">+8</span>
+            </label>
+            <label>
+              Voice 2 Mix
+              <input id="synthVoice2Mix" type="range" min="0" max="100" step="1" value="38">
+              <span id="synthVoice2MixValue">38%</span>
+            </label>
+            <label class="inline synth-voice2-toggle synth-inline-end">
+              <input id="synthVoice2Enabled" type="checkbox" checked>
+              Enable Voice 2
+            </label>
+          </div>
+
+          <div class="synth-row-divider"></div>
+
+          <div class="synth-row-grid synth-row-filter">
+            <label>
+              Filter Type
+              <select id="synthFilterType">
+                <option value="none">None</option>
+                <option value="lowpass" selected>Lowpass</option>
+                <option value="bandpass">Bandpass</option>
+                <option value="highpass">Highpass</option>
+              </select>
+            </label>
+            <label>
+              Filter Q
+              <input id="synthFilterQ" type="range" min="0.1" max="16" step="0.1" value="0.8">
+              <span id="synthFilterQValue">0.8</span>
+            </label>
+            <label>
+              Filter Cutoff (Hz)
+              <input id="synthFilterCutoff" type="range" min="250" max="7000" step="25" value="3200">
+              <span id="synthFilterCutoffValue">3200 Hz</span>
+            </label>
+            <label>
+              Keyboard Tracking
+              <input id="synthKeyboardTrackingPct" type="range" min="0" max="100" step="1" value="45">
+              <span id="synthKeyboardTrackingPctValue">45%</span>
+            </label>
+          </div>
+
+          <div class="synth-row-grid synth-row-envelope">
+            <label>
+              Attack (ms)
+              <input id="synthAttackMs" type="range" min="1" max="300" step="1" value="14">
+              <span id="synthAttackMsValue">14</span>
+            </label>
+            <label>
+              Decay (ms)
+              <input id="synthDecayMs" type="range" min="5" max="900" step="5" value="160">
+              <span id="synthDecayMsValue">160</span>
+            </label>
+            <label>
+              Sustain (%)
+              <input id="synthSustainPct" type="range" min="0" max="100" step="1" value="72">
+              <span id="synthSustainPctValue">72%</span>
+            </label>
+            <label>
+              Release (ms)
+              <input id="synthReleaseMs" type="range" min="10" max="1200" step="5" value="170">
+              <span id="synthReleaseMsValue">170</span>
+            </label>
+          </div>
+
+          <div class="synth-row-divider"></div>
+
+          <div class="synth-row-grid synth-row-amp-envelope">
+            <label>
+              Amp Attack (ms)
+              <input id="ampAttackMs" type="range" min="1" max="300" step="1" value="8">
+              <span id="ampAttackMsValue">8</span>
+            </label>
+            <label>
+              Amp Decay (ms)
+              <input id="ampDecayMs" type="range" min="5" max="900" step="5" value="120">
+              <span id="ampDecayMsValue">120</span>
+            </label>
+            <label>
+              Amp Sustain (%)
+              <input id="ampSustainPct" type="range" min="0" max="100" step="1" value="92">
+              <span id="ampSustainPctValue">92%</span>
+            </label>
+            <label>
+              Amp Release (ms)
+              <input id="ampReleaseMs" type="range" min="10" max="1200" step="5" value="130">
+              <span id="ampReleaseMsValue">130</span>
+            </label>
+          </div>
+
+          <div class="synth-row-grid synth-row-dynamics">
+            <label class="inline playback-toggle synth-inline-end">
+              <input id="continuousDynamics" type="checkbox" checked>
+              Follow Original Amplitude
+            </label>
+            <label>
+              Output Gain
+              <input id="synthOutputGain" type="range" min="10" max="100" step="1" value="55">
+              <span id="synthOutputGainValue">55%</span>
+            </label>
+          </div>
+        </div>
       </div>
     </section>
 
+    <section class="panel viz-panel">
+      <h2>Derived MIDI Timeline</h2>
+      <canvas id="midiCanvas" width="1200" height="260"></canvas>
+    </section>
+
     <section class="panel status-panel">
-      <div id="statusText">Idle. Press Start Recording.</div>
+      <div id="statusText">Idle</div>
       <div class="stats">
         <span>Duration: <strong id="durationValue">-</strong></span>
         <span>Noise Floor RMS: <strong id="noiseFloorValue">-</strong></span>
@@ -137,11 +297,6 @@
         <span>Notes: <strong id="noteCountValue">0</strong></span>
         <span>Scale: <strong id="scaleInfoValue">Auto</strong></span>
       </div>
-    </section>
-
-    <section class="panel viz-panel">
-      <h2>Derived MIDI Timeline</h2>
-      <canvas id="midiCanvas" width="1200" height="260"></canvas>
     </section>
 
     <section class="panel viz-panel">

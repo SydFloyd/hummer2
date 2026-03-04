@@ -31,7 +31,21 @@ const APP_CONFIG = {
     yinThreshold: { min: 0.05, max: 0.35, step: 0.01, defaultValue: 0.14 },
     yinClarity: { min: 0.05, max: 0.95, step: 0.01, defaultValue: 0.2 },
     mpmThreshold: { min: 0.1, max: 0.95, step: 0.01, defaultValue: 0.55 },
-    mpmClarity: { min: 0.1, max: 0.99, step: 0.01, defaultValue: 0.55 }
+    mpmClarity: { min: 0.1, max: 0.99, step: 0.01, defaultValue: 0.55 },
+    synthFilterCutoff: { min: 250, max: 7000, step: 25, defaultValue: 3200 },
+    synthFilterQ: { min: 0.1, max: 16, step: 0.1, defaultValue: 0.8 },
+    synthKeyboardTrackingPct: { min: 0, max: 100, step: 1, defaultValue: 45 },
+    synthVoice2Detune: { min: -40, max: 40, step: 1, defaultValue: 8 },
+    synthVoice2Mix: { min: 0, max: 100, step: 1, defaultValue: 38 },
+    synthOutputGain: { min: 10, max: 100, step: 1, defaultValue: 55 },
+    synthAttackMs: { min: 1, max: 300, step: 1, defaultValue: 14 },
+    synthDecayMs: { min: 5, max: 900, step: 5, defaultValue: 160 },
+    synthSustainPct: { min: 0, max: 100, step: 1, defaultValue: 72 },
+    synthReleaseMs: { min: 10, max: 1200, step: 5, defaultValue: 170 },
+    ampAttackMs: { min: 1, max: 300, step: 1, defaultValue: 8 },
+    ampDecayMs: { min: 5, max: 900, step: 5, defaultValue: 120 },
+    ampSustainPct: { min: 0, max: 100, step: 1, defaultValue: 92 },
+    ampReleaseMs: { min: 10, max: 1200, step: 5, defaultValue: 130 }
   },
   pitch: {
     minHz: 70,
@@ -46,7 +60,7 @@ const APP_CONFIG = {
     spectrogramFrameSize: 1024,
     spectrogramHopSize: 256,
     spectrogramMaxFreq: 4500,
-    trimTailMs: 100,
+    trimTailMs: 110,
     minFrameEnergy: 1e-7,
     pitchDetector: {
       defaultType: "autocorrelation",
@@ -88,6 +102,11 @@ const APP_CONFIG = {
     confidenceMarginScale: 0.4
   },
   playback: {
+    synth: {
+      oscillator: "sawtooth",
+      filterType: "lowpass",
+      voice2Enabled: true
+    },
     rawBend: {
       releaseMs: 30,
       maxGain: 0.5,
@@ -115,6 +134,9 @@ const state = {
   derived: null,
   playbackContext: null,
   playbackEndTimer: null,
+  loopPlayback: false,
+  controlsCollapsed: true,
+  synthPanelCollapsed: true,
   autotuneConfig: {
     keyRoot: APP_CONFIG.autotune.defaultRoot,
     modeId: APP_CONFIG.autotune.defaultModeId
@@ -124,12 +146,15 @@ const state = {
 const els = {
   startBtn: document.getElementById("startBtn"),
   stopBtn: document.getElementById("stopBtn"),
-  playOriginalBtn: document.getElementById("playOriginalBtn"),
-  playRawBendBtn: document.getElementById("playRawBendBtn"),
-  playRawBtn: document.getElementById("playRawBtn"),
-  playAutoBtn: document.getElementById("playAutoBtn"),
+  playSelectedBtn: document.getElementById("playSelectedBtn"),
+  loopToggleBtn: document.getElementById("loopToggleBtn"),
+  playbackModeRadios: Array.from(document.querySelectorAll("input[name='playMode']")),
   playScaleBtn: document.getElementById("playScaleBtn"),
+  toggleControlsBtn: document.getElementById("toggleControlsBtn"),
+  toggleSynthPanelBtn: document.getElementById("toggleSynthPanelBtn"),
   resetDefaultsBtn: document.getElementById("resetDefaultsBtn"),
+  selectionPanel: document.getElementById("selectionPanel"),
+  synthSelectionPanel: document.getElementById("synthSelectionPanel"),
   continuousDynamics: document.getElementById("continuousDynamics"),
   downsamplePitch: document.getElementById("downsamplePitch"),
   gateMultiplier: document.getElementById("gateMultiplier"),
@@ -155,6 +180,37 @@ const els = {
   mpmThresholdValue: document.getElementById("mpmThresholdValue"),
   mpmClarity: document.getElementById("mpmClarity"),
   mpmClarityValue: document.getElementById("mpmClarityValue"),
+  synthOscillator: document.getElementById("synthOscillator"),
+  synthFilterType: document.getElementById("synthFilterType"),
+  synthFilterCutoff: document.getElementById("synthFilterCutoff"),
+  synthFilterCutoffValue: document.getElementById("synthFilterCutoffValue"),
+  synthFilterQ: document.getElementById("synthFilterQ"),
+  synthFilterQValue: document.getElementById("synthFilterQValue"),
+  synthKeyboardTrackingPct: document.getElementById("synthKeyboardTrackingPct"),
+  synthKeyboardTrackingPctValue: document.getElementById("synthKeyboardTrackingPctValue"),
+  synthVoice2Enabled: document.getElementById("synthVoice2Enabled"),
+  synthVoice2Detune: document.getElementById("synthVoice2Detune"),
+  synthVoice2DetuneValue: document.getElementById("synthVoice2DetuneValue"),
+  synthVoice2Mix: document.getElementById("synthVoice2Mix"),
+  synthVoice2MixValue: document.getElementById("synthVoice2MixValue"),
+  synthOutputGain: document.getElementById("synthOutputGain"),
+  synthOutputGainValue: document.getElementById("synthOutputGainValue"),
+  synthAttackMs: document.getElementById("synthAttackMs"),
+  synthAttackMsValue: document.getElementById("synthAttackMsValue"),
+  synthDecayMs: document.getElementById("synthDecayMs"),
+  synthDecayMsValue: document.getElementById("synthDecayMsValue"),
+  synthSustainPct: document.getElementById("synthSustainPct"),
+  synthSustainPctValue: document.getElementById("synthSustainPctValue"),
+  synthReleaseMs: document.getElementById("synthReleaseMs"),
+  synthReleaseMsValue: document.getElementById("synthReleaseMsValue"),
+  ampAttackMs: document.getElementById("ampAttackMs"),
+  ampAttackMsValue: document.getElementById("ampAttackMsValue"),
+  ampDecayMs: document.getElementById("ampDecayMs"),
+  ampDecayMsValue: document.getElementById("ampDecayMsValue"),
+  ampSustainPct: document.getElementById("ampSustainPct"),
+  ampSustainPctValue: document.getElementById("ampSustainPctValue"),
+  ampReleaseMs: document.getElementById("ampReleaseMs"),
+  ampReleaseMsValue: document.getElementById("ampReleaseMsValue"),
   pitchDetectorOptions: Array.from(document.querySelectorAll(".pitch-detector-option")),
   noteDerivation: document.getElementById("noteDerivation"),
   scaleRoot: document.getElementById("scaleRoot"),
@@ -178,6 +234,11 @@ function bootstrap() {
   populateScaleControls();
   wireEvents();
   syncControlLabels();
+  syncLoopToggleState();
+  syncPlayModeAvailability();
+  syncControlsPanelState();
+  syncSynthPanelState();
+  syncSynthControlState();
   syncPitchDetectorControlState();
   drawPlaceholder(els.waveCanvas, "Record audio to view waveform and RMS.");
   drawPlaceholder(els.specCanvas, "Stop recording to generate spectrogram and pitch track.");
@@ -196,10 +257,27 @@ function applyControlConfig() {
   applyRangeConfig(els.yinClarity, APP_CONFIG.controls.yinClarity);
   applyRangeConfig(els.mpmThreshold, APP_CONFIG.controls.mpmThreshold);
   applyRangeConfig(els.mpmClarity, APP_CONFIG.controls.mpmClarity);
+  applyRangeConfig(els.synthFilterCutoff, APP_CONFIG.controls.synthFilterCutoff);
+  applyRangeConfig(els.synthFilterQ, APP_CONFIG.controls.synthFilterQ);
+  applyRangeConfig(els.synthKeyboardTrackingPct, APP_CONFIG.controls.synthKeyboardTrackingPct);
+  applyRangeConfig(els.synthVoice2Detune, APP_CONFIG.controls.synthVoice2Detune);
+  applyRangeConfig(els.synthVoice2Mix, APP_CONFIG.controls.synthVoice2Mix);
+  applyRangeConfig(els.synthOutputGain, APP_CONFIG.controls.synthOutputGain);
+  applyRangeConfig(els.synthAttackMs, APP_CONFIG.controls.synthAttackMs);
+  applyRangeConfig(els.synthDecayMs, APP_CONFIG.controls.synthDecayMs);
+  applyRangeConfig(els.synthSustainPct, APP_CONFIG.controls.synthSustainPct);
+  applyRangeConfig(els.synthReleaseMs, APP_CONFIG.controls.synthReleaseMs);
+  applyRangeConfig(els.ampAttackMs, APP_CONFIG.controls.ampAttackMs);
+  applyRangeConfig(els.ampDecayMs, APP_CONFIG.controls.ampDecayMs);
+  applyRangeConfig(els.ampSustainPct, APP_CONFIG.controls.ampSustainPct);
+  applyRangeConfig(els.ampReleaseMs, APP_CONFIG.controls.ampReleaseMs);
   els.noteDerivation.value = APP_CONFIG.detection.rawPitchReducer;
   els.pitchDetector.value = APP_CONFIG.analysis.pitchDetector.defaultType;
   els.continuousDynamics.checked = DEFAULT_CONTINUOUS_DYNAMICS;
   els.downsamplePitch.checked = APP_CONFIG.analysis.pitchDetector.downsampleFactor > 1;
+  els.synthOscillator.value = APP_CONFIG.playback.synth.oscillator;
+  els.synthFilterType.value = APP_CONFIG.playback.synth.filterType;
+  els.synthVoice2Enabled.checked = APP_CONFIG.playback.synth.voice2Enabled;
 }
 
 function applyRangeConfig(input, config) {
@@ -236,11 +314,14 @@ function populateScaleControls() {
 function wireEvents() {
   els.startBtn.addEventListener("click", startRecording);
   els.stopBtn.addEventListener("click", stopRecording);
-  els.playOriginalBtn.addEventListener("click", playOriginalSample);
-  els.playRawBendBtn.addEventListener("click", playRawBend);
-  els.playRawBtn.addEventListener("click", () => playNotes("raw"));
-  els.playAutoBtn.addEventListener("click", () => playNotes("auto"));
+  els.playSelectedBtn.addEventListener("click", () => playSelectedMode(false));
+  els.loopToggleBtn.addEventListener("click", toggleLoopPlayback);
+  for (const radio of els.playbackModeRadios) {
+    radio.addEventListener("change", syncPlayModeAvailability);
+  }
   els.playScaleBtn.addEventListener("click", playSelectedScale);
+  els.toggleControlsBtn.addEventListener("click", toggleControlsPanel);
+  els.toggleSynthPanelBtn.addEventListener("click", toggleSynthPanel);
   els.resetDefaultsBtn.addEventListener("click", resetAllControlsToDefaults);
 
   els.gateMultiplier.addEventListener("input", () => {
@@ -272,6 +353,33 @@ function wireEvents() {
   bindPitchDetectorSlider(els.yinClarity);
   bindPitchDetectorSlider(els.mpmThreshold);
   bindPitchDetectorSlider(els.mpmClarity);
+  bindSynthSlider(els.synthFilterCutoff);
+  bindSynthSlider(els.synthFilterQ);
+  bindSynthSlider(els.synthKeyboardTrackingPct);
+  bindSynthSlider(els.synthVoice2Detune);
+  bindSynthSlider(els.synthVoice2Mix);
+  bindSynthSlider(els.synthOutputGain);
+  bindSynthSlider(els.synthAttackMs);
+  bindSynthSlider(els.synthDecayMs);
+  bindSynthSlider(els.synthSustainPct);
+  bindSynthSlider(els.synthReleaseMs);
+  bindSynthSlider(els.ampAttackMs);
+  bindSynthSlider(els.ampDecayMs);
+  bindSynthSlider(els.ampSustainPct);
+  bindSynthSlider(els.ampReleaseMs);
+  els.synthOscillator.addEventListener("change", syncControlLabels);
+  els.synthFilterType.addEventListener("change", () => {
+    syncSynthControlState();
+    syncControlLabels();
+  });
+  els.synthVoice2Enabled.addEventListener("change", () => {
+    syncSynthControlState();
+    syncControlLabels();
+  });
+  els.continuousDynamics.addEventListener("change", () => {
+    syncSynthControlState();
+    syncControlLabels();
+  });
   els.noteDerivation.addEventListener("change", rerunDerivation);
   els.scaleRoot.addEventListener("change", rerunDerivation);
   els.scaleMode.addEventListener("change", () => {
@@ -293,10 +401,133 @@ function syncControlLabels() {
   els.yinClarityValue.textContent = Number(els.yinClarity.value).toFixed(2);
   els.mpmThresholdValue.textContent = Number(els.mpmThreshold.value).toFixed(2);
   els.mpmClarityValue.textContent = Number(els.mpmClarity.value).toFixed(2);
+  els.synthFilterCutoffValue.textContent = `${Math.round(Number(els.synthFilterCutoff.value))} Hz`;
+  els.synthFilterQValue.textContent = Number(els.synthFilterQ.value).toFixed(1);
+  els.synthKeyboardTrackingPctValue.textContent = `${Math.round(Number(els.synthKeyboardTrackingPct.value))}%`;
+  const voice2Detune = Math.round(Number(els.synthVoice2Detune.value));
+  els.synthVoice2DetuneValue.textContent = `${voice2Detune >= 0 ? "+" : ""}${voice2Detune}`;
+  els.synthVoice2MixValue.textContent = `${Math.round(Number(els.synthVoice2Mix.value))}%`;
+  els.synthOutputGainValue.textContent = `${Math.round(Number(els.synthOutputGain.value))}%`;
+  els.synthAttackMsValue.textContent = String(Math.round(Number(els.synthAttackMs.value)));
+  els.synthDecayMsValue.textContent = String(Math.round(Number(els.synthDecayMs.value)));
+  els.synthSustainPctValue.textContent = `${Math.round(Number(els.synthSustainPct.value))}%`;
+  els.synthReleaseMsValue.textContent = String(Math.round(Number(els.synthReleaseMs.value)));
+  els.ampAttackMsValue.textContent = String(Math.round(Number(els.ampAttackMs.value)));
+  els.ampDecayMsValue.textContent = String(Math.round(Number(els.ampDecayMs.value)));
+  els.ampSustainPctValue.textContent = `${Math.round(Number(els.ampSustainPct.value))}%`;
+  els.ampReleaseMsValue.textContent = String(Math.round(Number(els.ampReleaseMs.value)));
 }
 
 function syncScaleControlState() {
   els.scaleRoot.disabled = els.scaleMode.value === "auto";
+}
+
+function toggleControlsPanel() {
+  state.controlsCollapsed = !state.controlsCollapsed;
+  syncControlsPanelState();
+}
+
+function toggleSynthPanel() {
+  state.synthPanelCollapsed = !state.synthPanelCollapsed;
+  syncSynthPanelState();
+}
+
+function syncControlsPanelState() {
+  const collapsed = Boolean(state.controlsCollapsed);
+  els.selectionPanel.hidden = collapsed;
+  els.toggleControlsBtn.textContent = collapsed ? "\u25b8" : "\u25be";
+  els.toggleControlsBtn.title = collapsed ? "Expand settings" : "Collapse settings";
+  els.toggleControlsBtn.setAttribute("aria-label", collapsed ? "Expand settings" : "Collapse settings");
+  els.toggleControlsBtn.setAttribute("aria-expanded", collapsed ? "false" : "true");
+}
+
+function syncSynthPanelState() {
+  const collapsed = Boolean(state.synthPanelCollapsed);
+  els.synthSelectionPanel.hidden = collapsed;
+  els.toggleSynthPanelBtn.textContent = collapsed ? "\u25b8" : "\u25be";
+  els.toggleSynthPanelBtn.title = collapsed ? "Expand synth settings" : "Collapse synth settings";
+  els.toggleSynthPanelBtn.setAttribute("aria-label", collapsed ? "Expand synth settings" : "Collapse synth settings");
+  els.toggleSynthPanelBtn.setAttribute("aria-expanded", collapsed ? "false" : "true");
+}
+
+function syncSynthControlState() {
+  const voice2Enabled = Boolean(els.synthVoice2Enabled.checked);
+  const filterEnabled = els.synthFilterType.value !== "none";
+  const ampEnvelopeEnabled = !Boolean(els.continuousDynamics.checked);
+
+  setControlEnabled(els.synthVoice2Detune, voice2Enabled);
+  setControlEnabled(els.synthVoice2Mix, voice2Enabled);
+  setControlEnabled(els.synthFilterQ, filterEnabled);
+  setControlEnabled(els.synthFilterCutoff, filterEnabled);
+  setControlEnabled(els.synthKeyboardTrackingPct, filterEnabled);
+  setControlEnabled(els.ampAttackMs, ampEnvelopeEnabled);
+  setControlEnabled(els.ampDecayMs, ampEnvelopeEnabled);
+  setControlEnabled(els.ampSustainPct, ampEnvelopeEnabled);
+  setControlEnabled(els.ampReleaseMs, ampEnvelopeEnabled);
+}
+
+function setControlEnabled(control, enabled) {
+  control.disabled = !enabled;
+  const label = control.closest("label");
+  if (label) {
+    label.classList.toggle("control-disabled", !enabled);
+  }
+}
+
+function toggleLoopPlayback() {
+  state.loopPlayback = !state.loopPlayback;
+  syncLoopToggleState();
+}
+
+function syncLoopToggleState() {
+  const active = Boolean(state.loopPlayback);
+  els.loopToggleBtn.classList.toggle("loop-active", active);
+  els.loopToggleBtn.setAttribute("aria-pressed", active ? "true" : "false");
+  els.loopToggleBtn.title = active ? "Loop playback is on" : "Loop playback is off";
+}
+
+function getSelectedPlaybackMode() {
+  const active = els.playbackModeRadios.find((radio) => radio.checked);
+  return active ? active.value : "rawBend";
+}
+
+function canPlayMode(mode) {
+  if (mode === "original") {
+    return Boolean(state.originalAudioBuffer);
+  }
+  if (!state.analysis || !state.derived) {
+    return false;
+  }
+  if (mode === "rawBend") {
+    return hasBendPlayableData();
+  }
+  if (mode === "raw") {
+    return state.derived.rawNotes.length > 0;
+  }
+  return state.derived.autoNotes.length > 0;
+}
+
+function syncPlayModeAvailability() {
+  for (const radio of els.playbackModeRadios) {
+    radio.disabled = !canPlayMode(radio.value);
+    const label = radio.closest("label");
+    if (label) {
+      label.classList.toggle("control-disabled", radio.disabled);
+    }
+  }
+
+  let selected = getSelectedPlaybackMode();
+  if (!canPlayMode(selected)) {
+    const fallback = els.playbackModeRadios.find((radio) => !radio.disabled);
+    if (fallback) {
+      fallback.checked = true;
+      selected = fallback.value;
+    }
+  }
+
+  const canPlay = canPlayMode(selected);
+  const isRecording = Boolean(state.mediaRecorder && state.mediaRecorder.state === "recording");
+  els.playSelectedBtn.disabled = isRecording || !canPlay;
 }
 
 function syncPitchDetectorControlState() {
@@ -309,6 +540,10 @@ function syncPitchDetectorControlState() {
 function bindPitchDetectorSlider(input) {
   input.addEventListener("input", syncControlLabels);
   input.addEventListener("change", rerunPitchAnalysis);
+}
+
+function bindSynthSlider(input) {
+  input.addEventListener("input", syncControlLabels);
 }
 
 function resetAllControlsToDefaults() {
@@ -328,7 +563,9 @@ function resetAllControlsToDefaults() {
 
   syncScaleControlState();
   syncPitchDetectorControlState();
+  syncSynthControlState();
   syncControlLabels();
+  syncPlayModeAvailability();
 
   if (!state.analysis) {
     setStatus("Defaults restored.");
@@ -371,10 +608,7 @@ async function startRecording() {
     setStatus("Recording... hum or sing a phrase, then stop.");
     els.startBtn.disabled = true;
     els.stopBtn.disabled = false;
-    els.playOriginalBtn.disabled = true;
-    els.playRawBtn.disabled = true;
-    els.playRawBendBtn.disabled = true;
-    els.playAutoBtn.disabled = true;
+    els.playSelectedBtn.disabled = true;
     els.playScaleBtn.disabled = true;
   } catch (error) {
     setStatus(`Microphone error: ${error.message}`);
@@ -423,7 +657,7 @@ async function handleRecordingStopped() {
       state.mediaStream.getTracks().forEach((track) => track.stop());
     }
     els.startBtn.disabled = false;
-    els.playOriginalBtn.disabled = !state.originalAudioBuffer;
+    syncPlayModeAvailability();
     els.playScaleBtn.disabled = false;
   }
 }
@@ -465,10 +699,7 @@ function rerunDerivation() {
   renderTable();
   renderWaveform();
   renderMidiTimeline();
-
-  els.playRawBtn.disabled = rawNotes.length === 0;
-  els.playRawBendBtn.disabled = !hasBendPlayableData();
-  els.playAutoBtn.disabled = autoNotes.length === 0;
+  syncPlayModeAvailability();
 }
 
 function rerunPitchAnalysis() {
@@ -1821,10 +2052,155 @@ function isContinuousDynamicsEnabled() {
   return Boolean(els.continuousDynamics && els.continuousDynamics.checked);
 }
 
-function playNotes(mode) {
+function readPlaybackSynthSettingsFromUi() {
+  const oscillator = sanitizeChoice(
+    els.synthOscillator.value,
+    ["sine", "square", "sawtooth", "triangle"],
+    APP_CONFIG.playback.synth.oscillator
+  );
+  const filterType = sanitizeChoice(
+    els.synthFilterType.value,
+    ["none", "lowpass", "bandpass", "highpass"],
+    APP_CONFIG.playback.synth.filterType
+  );
+  const followOriginalAmplitude = Boolean(els.continuousDynamics.checked);
+  const voice2Enabled = Boolean(els.synthVoice2Enabled.checked);
+  const detune = sanitizeNumericSetting(
+    els.synthVoice2Detune.value,
+    APP_CONFIG.controls.synthVoice2Detune,
+    APP_CONFIG.controls.synthVoice2Detune.defaultValue
+  );
+  const voice2Mix = sanitizeNumericSetting(
+    els.synthVoice2Mix.value,
+    APP_CONFIG.controls.synthVoice2Mix,
+    APP_CONFIG.controls.synthVoice2Mix.defaultValue
+  ) / 100;
+  const outputGain = sanitizeNumericSetting(
+    els.synthOutputGain.value,
+    APP_CONFIG.controls.synthOutputGain,
+    APP_CONFIG.controls.synthOutputGain.defaultValue
+  ) / 100;
+  const attackSec = sanitizeNumericSetting(
+    els.synthAttackMs.value,
+    APP_CONFIG.controls.synthAttackMs,
+    APP_CONFIG.controls.synthAttackMs.defaultValue
+  ) / 1000;
+  const decaySec = sanitizeNumericSetting(
+    els.synthDecayMs.value,
+    APP_CONFIG.controls.synthDecayMs,
+    APP_CONFIG.controls.synthDecayMs.defaultValue
+  ) / 1000;
+  const sustainLevel = sanitizeNumericSetting(
+    els.synthSustainPct.value,
+    APP_CONFIG.controls.synthSustainPct,
+    APP_CONFIG.controls.synthSustainPct.defaultValue
+  ) / 100;
+  const releaseSec = sanitizeNumericSetting(
+    els.synthReleaseMs.value,
+    APP_CONFIG.controls.synthReleaseMs,
+    APP_CONFIG.controls.synthReleaseMs.defaultValue
+  ) / 1000;
+  const filterCutoff = sanitizeNumericSetting(
+    els.synthFilterCutoff.value,
+    APP_CONFIG.controls.synthFilterCutoff,
+    APP_CONFIG.controls.synthFilterCutoff.defaultValue
+  );
+  const filterQ = sanitizeNumericSetting(
+    els.synthFilterQ.value,
+    APP_CONFIG.controls.synthFilterQ,
+    APP_CONFIG.controls.synthFilterQ.defaultValue
+  );
+  const keyboardTracking = sanitizeNumericSetting(
+    els.synthKeyboardTrackingPct.value,
+    APP_CONFIG.controls.synthKeyboardTrackingPct,
+    APP_CONFIG.controls.synthKeyboardTrackingPct.defaultValue
+  ) / 100;
+  const ampAttackSec = sanitizeNumericSetting(
+    els.ampAttackMs.value,
+    APP_CONFIG.controls.ampAttackMs,
+    APP_CONFIG.controls.ampAttackMs.defaultValue
+  ) / 1000;
+  const ampDecaySec = sanitizeNumericSetting(
+    els.ampDecayMs.value,
+    APP_CONFIG.controls.ampDecayMs,
+    APP_CONFIG.controls.ampDecayMs.defaultValue
+  ) / 1000;
+  const ampSustainLevel = sanitizeNumericSetting(
+    els.ampSustainPct.value,
+    APP_CONFIG.controls.ampSustainPct,
+    APP_CONFIG.controls.ampSustainPct.defaultValue
+  ) / 100;
+  const ampReleaseSec = sanitizeNumericSetting(
+    els.ampReleaseMs.value,
+    APP_CONFIG.controls.ampReleaseMs,
+    APP_CONFIG.controls.ampReleaseMs.defaultValue
+  ) / 1000;
+
+  return {
+    oscillator,
+    filterType,
+    filterCutoff,
+    filterQ,
+    keyboardTracking: clamp(keyboardTracking, 0, 1),
+    followOriginalAmplitude,
+    voice2Enabled,
+    voice2DetuneCents: detune,
+    voice2Mix: clamp(voice2Mix, 0, 1),
+    outputGain: clamp(outputGain, 0.05, 1),
+    attackSec: clamp(attackSec, 0.001, 2),
+    decaySec: clamp(decaySec, 0.001, 3),
+    sustainLevel: clamp(sustainLevel, 0, 1),
+    releaseSec: clamp(releaseSec, 0.01, 4),
+    ampEnvelope: {
+      attackSec: clamp(ampAttackSec, 0.001, 2),
+      decaySec: clamp(ampDecaySec, 0.001, 3),
+      sustainLevel: clamp(ampSustainLevel, 0, 1),
+      releaseSec: clamp(ampReleaseSec, 0.01, 4)
+    }
+  };
+}
+
+function playSelectedMode(fromLoop = false) {
+  const mode = getSelectedPlaybackMode();
+  if (!canPlayMode(mode)) {
+    syncPlayModeAvailability();
+    if (!fromLoop) {
+      setStatus("No playable data for the selected mode.");
+    }
+    return;
+  }
+
+  if (mode === "original") {
+    playOriginalSample(fromLoop);
+    return;
+  }
+  if (mode === "rawBend") {
+    playRawBend(fromLoop);
+    return;
+  }
+  if (mode === "raw") {
+    playNotes("raw", fromLoop);
+    return;
+  }
+  playNotes("auto", fromLoop);
+}
+
+function schedulePlaybackCompletion(totalMs, replayAction) {
+  state.playbackEndTimer = setTimeout(() => {
+    stopPlayback();
+    if (state.loopPlayback && typeof replayAction === "function") {
+      replayAction(true);
+      return;
+    }
+    setStatus("Playback complete.");
+  }, totalMs + 110);
+}
+
+function playNotes(mode, fromLoop = false) {
   if (!state.derived || !state.analysis) {
     return;
   }
+  const synthSettings = readPlaybackSynthSettingsFromUi();
   const notes = mode === "raw" ? state.derived.rawNotes : state.derived.autoNotes;
   if (!notes.length) {
     setStatus("No notes available for playback.");
@@ -1838,7 +2214,7 @@ function playNotes(mode) {
       mode,
       smoothingAmount
     );
-    const played = playContinuousSegments(segments);
+    const played = playContinuousSegments(segments, synthSettings, () => playNotes(mode, true));
     if (!played) {
       setStatus("No voiced frames available for continuous playback.");
       return;
@@ -1861,19 +2237,18 @@ function playNotes(mode) {
     if (end > maxEnd) maxEnd = end;
 
     const midiValue = mode === "raw" ? note.rawMidi : note.midi;
-    triggerSynthVoice(ctx, midiToHz(midiValue), start, end, master, mode);
+    triggerSynthVoice(ctx, midiToHz(midiValue), start, end, master, mode, synthSettings);
   }
 
   const totalMs = Math.max(150, (maxEnd - ctx.currentTime) * 1000);
-  state.playbackEndTimer = setTimeout(() => {
-    stopPlayback();
-    setStatus("Playback complete.");
-  }, totalMs + 100);
+  schedulePlaybackCompletion(totalMs, () => playNotes(mode, true));
 
-  setStatus(mode === "raw" ? "Playing raw vocal pitch..." : "Playing autotuned note sequence...");
+  if (!fromLoop) {
+    setStatus(mode === "raw" ? "Playing raw vocal pitch..." : "Playing autotuned note sequence...");
+  }
 }
 
-function playOriginalSample() {
+function playOriginalSample(fromLoop = false) {
   if (!state.originalAudioBuffer) {
     setStatus("No original recording available yet.");
     return;
@@ -1894,18 +2269,18 @@ function playOriginalSample() {
   source.stop(startAt + state.originalAudioBuffer.duration);
 
   const totalMs = Math.max(200, state.originalAudioBuffer.duration * 1000);
-  state.playbackEndTimer = setTimeout(() => {
-    stopPlayback();
-    setStatus("Playback complete.");
-  }, totalMs + 110);
+  schedulePlaybackCompletion(totalMs, () => playOriginalSample(true));
 
-  setStatus("Playing original recording...");
+  if (!fromLoop) {
+    setStatus("Playing original recording...");
+  }
 }
 
-function playRawBend() {
+function playRawBend(fromLoop = false) {
   if (!state.analysis || !state.derived) {
     return;
   }
+  const synthSettings = readPlaybackSynthSettingsFromUi();
   const smoothingAmount = clamp((Number(els.bendSmoothing.value) || 0) / 100, 0, 1);
   const scaleForGravity = getScaleForRawBendGravity();
   const segments = buildRawBendSegments(state.analysis, state.derived.threshold, {
@@ -1917,12 +2292,14 @@ function playRawBend() {
     return;
   }
   const gravityLabel = scaleForGravity ? formatScaleName(scaleForGravity.keyRoot, scaleForGravity.modeId) : "off";
-  const played = playContinuousSegments(segments);
+  const played = playContinuousSegments(segments, synthSettings, () => playRawBend(true));
   if (!played) {
     setStatus("No bend-capable raw frames available.");
     return;
   }
-  setStatus(`Playing raw pitch + bend (${Math.round(smoothingAmount * 100)}% smooth, gravity ${gravityLabel})...`);
+  if (!fromLoop) {
+    setStatus(`Playing raw pitch + bend (${Math.round(smoothingAmount * 100)}% smooth, gravity ${gravityLabel})...`);
+  }
 }
 
 function getScaleForRawBendGravity() {
@@ -1935,8 +2312,9 @@ function getScaleForRawBendGravity() {
   return resolveScaleForPreview();
 }
 
-function playSelectedScale() {
+function playSelectedScale(fromLoop = false) {
   const scale = resolveScaleForPreview();
+  const synthSettings = readPlaybackSynthSettingsFromUi();
   const notes = buildScaleMidiSequence(scale.keyRoot, scale.modeId, 60);
   if (!notes.length) {
     setStatus("Unable to build a scale preview.");
@@ -1956,17 +2334,16 @@ function playSelectedScale() {
   for (let i = 0; i < notes.length; i++) {
     const start = startAt + i * stepSeconds;
     const end = start + noteSeconds;
-    triggerSynthVoice(ctx, midiToHz(notes[i]), start, end, master, "auto");
+    triggerSynthVoice(ctx, midiToHz(notes[i]), start, end, master, "auto", synthSettings);
     maxEnd = Math.max(maxEnd, end);
   }
 
   const totalMs = Math.max(200, (maxEnd - ctx.currentTime) * 1000);
-  state.playbackEndTimer = setTimeout(() => {
-    stopPlayback();
-    setStatus("Playback complete.");
-  }, totalMs + 110);
+  schedulePlaybackCompletion(totalMs, () => playSelectedScale(true));
 
-  setStatus(`Playing scale: ${formatScaleName(scale.keyRoot, scale.modeId)}`);
+  if (!fromLoop) {
+    setStatus(`Playing scale: ${formatScaleName(scale.keyRoot, scale.modeId)}`);
+  }
 }
 
 function resolveScaleForPreview() {
@@ -2034,7 +2411,7 @@ function stopPlayback() {
   state.playbackContext = null;
 }
 
-function playContinuousSegments(segments) {
+function playContinuousSegments(segments, synthSettings, replayAction) {
   if (!segments || !segments.length) {
     return false;
   }
@@ -2047,15 +2424,12 @@ function playContinuousSegments(segments) {
   const startAt = ctx.currentTime + 0.05;
   let maxEnd = 0;
   for (const segment of segments) {
-    triggerBendVoice(ctx, segment, startAt, master);
+    triggerBendVoice(ctx, segment, startAt, master, synthSettings);
     maxEnd = Math.max(maxEnd, startAt + segment.endTime);
   }
 
   const totalMs = Math.max(200, (maxEnd - ctx.currentTime) * 1000);
-  state.playbackEndTimer = setTimeout(() => {
-    stopPlayback();
-    setStatus("Playback complete.");
-  }, totalMs + 120);
+  schedulePlaybackCompletion(totalMs + 10, replayAction);
   return true;
 }
 
@@ -2072,41 +2446,115 @@ function createPlaybackChain(ctx) {
   return master;
 }
 
-function triggerSynthVoice(ctx, freqHz, start, end, destination, mode) {
-  const voiceFilter = ctx.createBiquadFilter();
-  voiceFilter.type = "lowpass";
-  voiceFilter.frequency.setValueAtTime(mode === "raw" ? 2400 : 2800, start);
-  voiceFilter.Q.value = 0.7;
+function createOscillatorPair(ctx, freqHz, start, synthSettings) {
+  const settings = synthSettings || readPlaybackSynthSettingsFromUi();
+  const baseFreq = Math.max(1, freqHz);
+  const voice2Mix = settings.voice2Enabled ? clamp(settings.voice2Mix, 0, 0.9) : 0;
+  const voice1Level = clamp(1 - voice2Mix * 0.55, 0.25, 1);
+  const voice2Level = settings.voice2Enabled ? clamp(voice2Mix, 0.08, 0.95) : 0;
+
+  const voices = [];
+  const voice1 = ctx.createOscillator();
+  voice1.type = settings.oscillator;
+  voice1.frequency.setValueAtTime(baseFreq, start);
+  voice1.detune.setValueAtTime(0, start);
+  const voice1Gain = ctx.createGain();
+  voice1Gain.gain.value = voice1Level;
+  voice1.connect(voice1Gain);
+  voices.push({ node: voice1, output: voice1Gain });
+
+  if (settings.voice2Enabled) {
+    const voice2 = ctx.createOscillator();
+    voice2.type = settings.oscillator;
+    voice2.frequency.setValueAtTime(baseFreq, start);
+    voice2.detune.setValueAtTime(settings.voice2DetuneCents, start);
+    const voice2Gain = ctx.createGain();
+    voice2Gain.gain.value = voice2Level;
+    voice2.connect(voice2Gain);
+    voices.push({ node: voice2, output: voice2Gain });
+  }
+
+  return voices;
+}
+
+function scheduleAdsrEnvelope(gainParam, start, end, peakGain, synthSettings) {
+  const settings = synthSettings || readPlaybackSynthSettingsFromUi();
+  const attackEnd = Math.min(end, start + settings.attackSec);
+  const decayEnd = Math.min(end, attackEnd + settings.decaySec);
+  const sustainGain = Math.max(0.0001, peakGain * settings.sustainLevel);
+  gainParam.cancelScheduledValues(start);
+  gainParam.setValueAtTime(0.0001, start);
+  gainParam.linearRampToValueAtTime(Math.max(0.0001, peakGain), attackEnd);
+  if (decayEnd > attackEnd) {
+    gainParam.linearRampToValueAtTime(sustainGain, decayEnd);
+  }
+  if (end > decayEnd) {
+    gainParam.setValueAtTime(sustainGain, end);
+  }
+  gainParam.linearRampToValueAtTime(0.0001, end + settings.releaseSec);
+}
+
+function envelopeMultiplierAtTime(relativeTime, segmentDuration, envelopeSettings) {
+  const settings = envelopeSettings || readPlaybackSynthSettingsFromUi();
+  const t = clamp(relativeTime, 0, segmentDuration);
+  if (t <= settings.attackSec) {
+    return clamp(t / Math.max(0.001, settings.attackSec), 0, 1);
+  }
+  const decayStart = settings.attackSec;
+  const decayEnd = decayStart + settings.decaySec;
+  if (t <= decayEnd) {
+    const progress = (t - decayStart) / Math.max(0.001, settings.decaySec);
+    return 1 - (1 - settings.sustainLevel) * progress;
+  }
+  return settings.sustainLevel;
+}
+
+function resolveFilterCutoffForMidi(settings, midiValue, cutoffOffset = 0) {
+  const tracking = clamp(settings.keyboardTracking || 0, 0, 1);
+  const semitonesFromMiddleC = midiValue - 60;
+  const trackingRatio = Math.pow(2, (semitonesFromMiddleC / 12) * tracking);
+  const baseCutoff = Math.max(80, settings.filterCutoff + cutoffOffset);
+  return clamp(baseCutoff * trackingRatio, 60, 16000);
+}
+
+function triggerSynthVoice(ctx, freqHz, start, end, destination, mode, synthSettings) {
+  const settings = synthSettings || readPlaybackSynthSettingsFromUi();
+  const safeFreq = Math.max(1, freqHz);
+  const midiValue = hzToMidi(safeFreq);
+  const modeCutoffBoost = mode === "raw" ? 0 : 240;
+  const useFilter = settings.filterType !== "none";
+  let voiceFilter = null;
+  if (useFilter) {
+    voiceFilter = ctx.createBiquadFilter();
+    voiceFilter.type = settings.filterType;
+    const cutoff = resolveFilterCutoffForMidi(settings, midiValue, modeCutoffBoost);
+    voiceFilter.frequency.setValueAtTime(cutoff, start);
+    voiceFilter.Q.value = settings.filterQ;
+  }
 
   const voiceGain = ctx.createGain();
-  const peak = mode === "raw" ? 0.25 : 0.22;
-  const releaseAt = Math.max(start + 0.06, end);
-  voiceGain.gain.setValueAtTime(0.0001, start);
-  voiceGain.gain.exponentialRampToValueAtTime(peak, start + 0.012);
-  voiceGain.gain.exponentialRampToValueAtTime(0.001, releaseAt);
+  const modeBasePeak = mode === "raw" ? 0.32 : 0.28;
+  const peak = modeBasePeak * settings.outputGain;
+  scheduleAdsrEnvelope(voiceGain.gain, start, end, peak, settings);
 
-  const bright = ctx.createOscillator();
-  bright.type = mode === "raw" ? "sawtooth" : "square";
-  bright.frequency.setValueAtTime(freqHz, start);
-  bright.detune.setValueAtTime(-3, start);
+  const oscillators = createOscillatorPair(ctx, safeFreq, start, settings);
+  for (const osc of oscillators) {
+    if (voiceFilter) {
+      osc.output.connect(voiceFilter);
+    } else {
+      osc.output.connect(voiceGain);
+    }
+  }
+  if (voiceFilter) {
+    voiceFilter.connect(voiceGain);
+  }
+  voiceGain.connect(destination);
 
-  const body = ctx.createOscillator();
-  body.type = "triangle";
-  body.frequency.setValueAtTime(freqHz * 0.5, start);
-
-  const brightGain = ctx.createGain();
-  brightGain.gain.value = 0.82;
-  const bodyGain = ctx.createGain();
-  bodyGain.gain.value = 0.24;
-
-  bright.connect(brightGain).connect(voiceFilter);
-  body.connect(bodyGain).connect(voiceFilter);
-  voiceFilter.connect(voiceGain).connect(destination);
-
-  bright.start(start);
-  body.start(start);
-  bright.stop(end + 0.06);
-  body.stop(end + 0.06);
+  const stopAt = end + settings.releaseSec + 0.04;
+  for (const osc of oscillators) {
+    osc.node.start(start);
+    osc.node.stop(stopAt);
+  }
 }
 
 function buildNoteDrivenContinuousSegments(analysis, notes, mode, smoothingAmount) {
@@ -2389,53 +2837,75 @@ function pushBendSegment(segments, analysis, midiTrack, gainTrack, startFrame, e
   segments.push({ startTime, endTime, points });
 }
 
-function triggerBendVoice(ctx, segment, startAt, destination) {
+function triggerBendVoice(ctx, segment, startAt, destination, synthSettings) {
+  const settings = synthSettings || readPlaybackSynthSettingsFromUi();
   const start = startAt + segment.startTime;
   const end = startAt + segment.endTime;
-  const releaseMs = APP_CONFIG.playback.rawBend.releaseMs / 1000;
+  const useAmpEnvelope = !settings.followOriginalAmplitude;
+  const envelopeSettings = useAmpEnvelope ? settings.ampEnvelope : null;
+  const envelopeRelease = envelopeSettings ? envelopeSettings.releaseSec : settings.releaseSec;
+  const releaseSec = Math.max(envelopeRelease, APP_CONFIG.playback.rawBend.releaseMs / 1000);
+  const segmentDuration = Math.max(0.01, end - start);
 
-  const voiceFilter = ctx.createBiquadFilter();
-  voiceFilter.type = "lowpass";
-  voiceFilter.frequency.setValueAtTime(3400, start);
-  voiceFilter.Q.value = 0.45;
+  const useFilter = settings.filterType !== "none";
+  let voiceFilter = null;
+  if (useFilter) {
+    voiceFilter = ctx.createBiquadFilter();
+    voiceFilter.type = settings.filterType;
+    const initialCutoff = resolveFilterCutoffForMidi(settings, segment.points[0].midi, 300);
+    voiceFilter.frequency.setValueAtTime(initialCutoff, start);
+    voiceFilter.Q.value = settings.filterQ;
+  }
 
   const amp = ctx.createGain();
   amp.gain.setValueAtTime(0.0001, start);
 
-  const bright = ctx.createOscillator();
-  bright.type = "sawtooth";
-  const body = ctx.createOscillator();
-  body.type = "triangle";
-
-  const brightGain = ctx.createGain();
-  brightGain.gain.value = 0.8;
-  const bodyGain = ctx.createGain();
-  bodyGain.gain.value = 0.26;
-
   const firstFreq = midiToHz(segment.points[0].midi);
-  bright.frequency.setValueAtTime(firstFreq, start);
-  body.frequency.setValueAtTime(firstFreq * 0.5, start);
-  amp.gain.linearRampToValueAtTime(segment.points[0].gain, Math.min(start + 0.01, end));
+  const oscillators = createOscillatorPair(ctx, firstFreq, start, settings);
+  const attackTime = Math.min(start + (envelopeSettings ? envelopeSettings.attackSec : 0.003), end);
+  const initialEnvelope = envelopeSettings ? envelopeMultiplierAtTime(0, segmentDuration, envelopeSettings) : 1;
+  const initialGain = segment.points[0].gain * initialEnvelope * settings.outputGain;
+  for (const osc of oscillators) {
+    osc.node.frequency.setValueAtTime(firstFreq, start);
+  }
+  amp.gain.linearRampToValueAtTime(Math.max(0.0001, initialGain), Math.max(start + 0.003, attackTime));
 
   for (let i = 1; i < segment.points.length; i++) {
     const point = segment.points[i];
     const t = startAt + point.time;
     const hz = midiToHz(point.midi);
-    bright.frequency.linearRampToValueAtTime(hz, t);
-    body.frequency.linearRampToValueAtTime(hz * 0.5, t);
-    amp.gain.linearRampToValueAtTime(Math.max(0.0001, point.gain), t);
+    for (const osc of oscillators) {
+      osc.node.frequency.linearRampToValueAtTime(Math.max(1, hz), t);
+    }
+    if (voiceFilter) {
+      const cutoff = resolveFilterCutoffForMidi(settings, point.midi, 300);
+      voiceFilter.frequency.linearRampToValueAtTime(cutoff, t);
+    }
+    const relativeTime = clamp(t - start, 0, segmentDuration);
+    const envelope = envelopeSettings ? envelopeMultiplierAtTime(relativeTime, segmentDuration, envelopeSettings) : 1;
+    const targetGain = point.gain * envelope * settings.outputGain;
+    amp.gain.linearRampToValueAtTime(Math.max(0.0001, targetGain), t);
   }
 
-  amp.gain.linearRampToValueAtTime(0.0001, end + releaseMs);
+  amp.gain.linearRampToValueAtTime(0.0001, end + releaseSec);
 
-  bright.connect(brightGain).connect(voiceFilter);
-  body.connect(bodyGain).connect(voiceFilter);
-  voiceFilter.connect(amp).connect(destination);
+  for (const osc of oscillators) {
+    if (voiceFilter) {
+      osc.output.connect(voiceFilter);
+    } else {
+      osc.output.connect(amp);
+    }
+  }
+  if (voiceFilter) {
+    voiceFilter.connect(amp);
+  }
+  amp.connect(destination);
 
-  bright.start(start);
-  body.start(start);
-  bright.stop(end + releaseMs + 0.03);
-  body.stop(end + releaseMs + 0.03);
+  const stopAt = end + releaseSec + 0.04;
+  for (const osc of oscillators) {
+    osc.node.start(start);
+    osc.node.stop(stopAt);
+  }
 }
 
 function toMono(audioBuffer) {
@@ -2534,6 +3004,10 @@ function sanitizeNumericSetting(value, range, fallback) {
     return fallback;
   }
   return clamp(numeric, range.min, range.max);
+}
+
+function sanitizeChoice(value, allowed, fallback) {
+  return allowed.includes(value) ? value : fallback;
 }
 
 function clamp(value, min, max) {
