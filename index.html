@@ -23,7 +23,7 @@
     <section class="panel controls">
       <div class="button-row">
         <button id="startBtn" class="transport-symbol-btn" type="button" aria-label="Start recording" title="Start recording">&#x25cf;</button>
-        <button id="stopBtn" class="transport-symbol-btn" type="button" aria-label="Stop recording" title="Stop recording" disabled>&#x25a0;</button>
+        <button id="stopBtn" class="transport-symbol-btn" type="button" aria-label="Stop recording or playback" title="Stop recording or playback" disabled>&#x25a0;</button>
         <button id="loopToggleBtn" class="icon-toggle icon-loop" type="button" aria-label="Toggle loop playback" title="Loop playback">&#x21bb;</button>
         <button id="playSelectedBtn" class="transport-symbol-btn" type="button" aria-label="Play selected mode" title="Play selected mode" disabled>&#x25b6;</button>
         <div class="play-mode-group" role="radiogroup" aria-label="Playback mode">
@@ -86,7 +86,7 @@
             </select>
           </label>
           <label>
-            Bend Smoothing
+            Portamento Speed
             <input id="bendSmoothing" type="range" min="0" max="100" step="1" value="35">
             <span id="bendSmoothingValue">35%</span>
           </label>
@@ -218,26 +218,31 @@
               <input id="synthKeyboardTrackingPct" type="range" min="0" max="100" step="1" value="45">
               <span id="synthKeyboardTrackingPctValue">45%</span>
             </label>
+            <label>
+              Filter Env Depth
+              <input id="synthFilterEnvDepth" type="range" min="0" max="2.5" step="0.05" value="1.1">
+              <span id="synthFilterEnvDepthValue">1.10 oct</span>
+            </label>
           </div>
 
           <div class="synth-row-grid synth-row-envelope">
             <label>
-              Attack (ms)
+              Filter Attack (ms)
               <input id="synthAttackMs" type="range" min="1" max="300" step="1" value="14">
               <span id="synthAttackMsValue">14</span>
             </label>
             <label>
-              Decay (ms)
+              Filter Decay (ms)
               <input id="synthDecayMs" type="range" min="5" max="900" step="5" value="160">
               <span id="synthDecayMsValue">160</span>
             </label>
             <label>
-              Sustain (%)
+              Filter Sustain (%)
               <input id="synthSustainPct" type="range" min="0" max="100" step="1" value="72">
               <span id="synthSustainPctValue">72%</span>
             </label>
             <label>
-              Release (ms)
+              Filter Release (ms)
               <input id="synthReleaseMs" type="range" min="10" max="1200" step="5" value="170">
               <span id="synthReleaseMsValue">170</span>
             </label>
@@ -278,6 +283,7 @@
               <input id="synthOutputGain" type="range" min="10" max="100" step="1" value="55">
               <span id="synthOutputGainValue">55%</span>
             </label>
+            <button id="synthTestBtn" type="button" title="Hold to test ADSR with middle C">test</button>
           </div>
         </div>
       </div>

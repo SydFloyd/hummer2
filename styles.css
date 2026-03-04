@@ -222,16 +222,39 @@ button:disabled {
 }
 
 .synth-row-voice,
-.synth-row-filter,
 .synth-row-envelope,
 .synth-row-amp-envelope {
   grid-template-columns: repeat(4, minmax(140px, 1fr));
 }
 
+.synth-row-filter {
+  grid-template-columns: repeat(5, minmax(120px, 1fr));
+}
+
+.synth-row-envelope {
+  margin-top: 0.4rem;
+}
+
 .synth-row-dynamics {
   margin-top: 0.75rem;
-  grid-template-columns: minmax(220px, 1fr) minmax(140px, 220px);
+  grid-template-columns: minmax(220px, 1fr) minmax(140px, 220px) auto;
   justify-content: space-between;
+  align-items: end;
+}
+
+#synthTestBtn {
+  min-width: 4.6rem;
+  font-size: 0.84rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  align-self: end;
+}
+
+#synthTestBtn.is-holding {
+  background: rgba(54, 190, 157, 0.34);
+  border-color: rgba(124, 244, 203, 0.65);
+  box-shadow: 0 0 0 1px rgba(124, 244, 203, 0.2) inset;
+  transform: translateY(0);
 }
 
 .synth-row-divider {
@@ -477,6 +500,10 @@ tbody td {
   }
 
   .synth-row-dynamics {
-    grid-template-columns: repeat(2, minmax(140px, 1fr));
+    grid-template-columns: repeat(3, minmax(120px, 1fr));
+  }
+
+  #synthTestBtn {
+    width: 100%;
   }
 }
