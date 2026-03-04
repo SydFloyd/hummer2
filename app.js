@@ -15,15 +15,22 @@ const SCALE_MODES = [
   { id: "arabic", label: "Arabic (Double Harmonic)", intervals: [0, 1, 4, 5, 7, 8, 11], detectable: true }
 ];
 const SCALE_BY_ID = Object.fromEntries(SCALE_MODES.map((mode) => [mode.id, mode]));
-const AUTO_DETECT_MODE_IDS = SCALE_MODES.filter((mode) => mode.detectable).map((mode) => mode.id);
+const AUTO_DETECT_MODE_ID = "major";
 
 const PITCH_MAX_MIDI = 76; // E5
+const DEFAULT_CONTINUOUS_DYNAMICS = true;
 const APP_CONFIG = {
   controls: {
     gateMultiplier: { min: 1.2, max: 6, step: 0.1, defaultValue: 2.5 },
     minNoteMs: { min: 20, max: 300, step: 5, defaultValue: 25 },
     pitchJumpSplit: { min: 0, max: 6, step: 0.1, defaultValue: 0.6 },
-    bendSmoothing: { min: 0, max: 100, step: 1, defaultValue: 35 }
+    bendSmoothing: { min: 0, max: 100, step: 1, defaultValue: 35 },
+    autocorrThreshold: { min: 0.1, max: 0.95, step: 0.01, defaultValue: 0.35 },
+    autocorrHarmonicBias: { min: 0, max: 0.25, step: 0.005, defaultValue: 0.05 },
+    yinThreshold: { min: 0.05, max: 0.35, step: 0.01, defaultValue: 0.14 },
+    yinClarity: { min: 0.05, max: 0.95, step: 0.01, defaultValue: 0.2 },
+    mpmThreshold: { min: 0.1, max: 0.95, step: 0.01, defaultValue: 0.55 },
+    mpmClarity: { min: 0.1, max: 0.99, step: 0.01, defaultValue: 0.55 }
   },
   pitch: {
     minHz: 70,
@@ -38,8 +45,22 @@ const APP_CONFIG = {
     spectrogramFrameSize: 1024,
     spectrogramHopSize: 256,
     spectrogramMaxFreq: 4500,
-    minF0Correlation: 0.35,
-    minFrameEnergy: 1e-7
+    minFrameEnergy: 1e-7,
+    pitchDetector: {
+      defaultType: "autocorrelation",
+      autocorrelation: {
+        threshold: 0.35,
+        harmonicBias: 0.05
+      },
+      yin: {
+        threshold: 0.14,
+        minClarity: 0.2
+      },
+      mpm: {
+        threshold: 0.55,
+        minClarity: 0.55
+      }
+    }
   },
   detection: {
     gateOffset: 0.0015,
@@ -103,6 +124,7 @@ const els = {
   playRawBtn: document.getElementById("playRawBtn"),
   playAutoBtn: document.getElementById("playAutoBtn"),
   playScaleBtn: document.getElementById("playScaleBtn"),
+  resetDefaultsBtn: document.getElementById("resetDefaultsBtn"),
   continuousDynamics: document.getElementById("continuousDynamics"),
   gateMultiplier: document.getElementById("gateMultiplier"),
   gateMultiplierValue: document.getElementById("gateMultiplierValue"),
@@ -112,6 +134,20 @@ const els = {
   pitchJumpSplitValue: document.getElementById("pitchJumpSplitValue"),
   bendSmoothing: document.getElementById("bendSmoothing"),
   bendSmoothingValue: document.getElementById("bendSmoothingValue"),
+  pitchDetector: document.getElementById("pitchDetector"),
+  autocorrThreshold: document.getElementById("autocorrThreshold"),
+  autocorrThresholdValue: document.getElementById("autocorrThresholdValue"),
+  autocorrHarmonicBias: document.getElementById("autocorrHarmonicBias"),
+  autocorrHarmonicBiasValue: document.getElementById("autocorrHarmonicBiasValue"),
+  yinThreshold: document.getElementById("yinThreshold"),
+  yinThresholdValue: document.getElementById("yinThresholdValue"),
+  yinClarity: document.getElementById("yinClarity"),
+  yinClarityValue: document.getElementById("yinClarityValue"),
+  mpmThreshold: document.getElementById("mpmThreshold"),
+  mpmThresholdValue: document.getElementById("mpmThresholdValue"),
+  mpmClarity: document.getElementById("mpmClarity"),
+  mpmClarityValue: document.getElementById("mpmClarityValue"),
+  pitchDetectorOptions: Array.from(document.querySelectorAll(".pitch-detector-option")),
   noteDerivation: document.getElementById("noteDerivation"),
   scaleRoot: document.getElementById("scaleRoot"),
   scaleMode: document.getElementById("scaleMode"),
@@ -134,8 +170,9 @@ function bootstrap() {
   populateScaleControls();
   wireEvents();
   syncControlLabels();
+  syncPitchDetectorControlState();
   drawPlaceholder(els.waveCanvas, "Record audio to view waveform and RMS.");
-  drawPlaceholder(els.specCanvas, "Stop recording to generate spectrogram and F0.");
+  drawPlaceholder(els.specCanvas, "Stop recording to generate spectrogram and pitch track.");
   drawPlaceholder(els.midiCanvas, "Derived MIDI timeline appears after processing.");
 }
 
@@ -144,7 +181,15 @@ function applyControlConfig() {
   applyRangeConfig(els.minNoteMs, APP_CONFIG.controls.minNoteMs);
   applyRangeConfig(els.pitchJumpSplit, APP_CONFIG.controls.pitchJumpSplit);
   applyRangeConfig(els.bendSmoothing, APP_CONFIG.controls.bendSmoothing);
+  applyRangeConfig(els.autocorrThreshold, APP_CONFIG.controls.autocorrThreshold);
+  applyRangeConfig(els.autocorrHarmonicBias, APP_CONFIG.controls.autocorrHarmonicBias);
+  applyRangeConfig(els.yinThreshold, APP_CONFIG.controls.yinThreshold);
+  applyRangeConfig(els.yinClarity, APP_CONFIG.controls.yinClarity);
+  applyRangeConfig(els.mpmThreshold, APP_CONFIG.controls.mpmThreshold);
+  applyRangeConfig(els.mpmClarity, APP_CONFIG.controls.mpmClarity);
   els.noteDerivation.value = APP_CONFIG.detection.rawPitchReducer;
+  els.pitchDetector.value = APP_CONFIG.analysis.pitchDetector.defaultType;
+  els.continuousDynamics.checked = DEFAULT_CONTINUOUS_DYNAMICS;
 }
 
 function applyRangeConfig(input, config) {
@@ -164,7 +209,7 @@ function populateScaleControls() {
 
   const autoOption = document.createElement("option");
   autoOption.value = "auto";
-  autoOption.textContent = "Auto Detect";
+  autoOption.textContent = "Auto Detect (Major Key)";
   els.scaleMode.appendChild(autoOption);
   for (const mode of SCALE_MODES) {
     const option = document.createElement("option");
@@ -185,6 +230,7 @@ function wireEvents() {
   els.playRawBtn.addEventListener("click", () => playNotes("raw"));
   els.playAutoBtn.addEventListener("click", () => playNotes("auto"));
   els.playScaleBtn.addEventListener("click", playSelectedScale);
+  els.resetDefaultsBtn.addEventListener("click", resetAllControlsToDefaults);
 
   els.gateMultiplier.addEventListener("input", () => {
     syncControlLabels();
@@ -199,6 +245,17 @@ function wireEvents() {
     rerunDerivation();
   });
   els.bendSmoothing.addEventListener("input", syncControlLabels);
+  els.pitchDetector.addEventListener("change", () => {
+    syncPitchDetectorControlState();
+    syncControlLabels();
+    rerunPitchAnalysis();
+  });
+  bindPitchDetectorSlider(els.autocorrThreshold);
+  bindPitchDetectorSlider(els.autocorrHarmonicBias);
+  bindPitchDetectorSlider(els.yinThreshold);
+  bindPitchDetectorSlider(els.yinClarity);
+  bindPitchDetectorSlider(els.mpmThreshold);
+  bindPitchDetectorSlider(els.mpmClarity);
   els.noteDerivation.addEventListener("change", rerunDerivation);
   els.scaleRoot.addEventListener("change", rerunDerivation);
   els.scaleMode.addEventListener("change", () => {
@@ -212,10 +269,60 @@ function syncControlLabels() {
   els.minNoteMsValue.textContent = String(Number(els.minNoteMs.value));
   els.pitchJumpSplitValue.textContent = Number(els.pitchJumpSplit.value).toFixed(1);
   els.bendSmoothingValue.textContent = `${Math.round(Number(els.bendSmoothing.value))}%`;
+  els.autocorrThresholdValue.textContent = Number(els.autocorrThreshold.value).toFixed(2);
+  els.autocorrHarmonicBiasValue.textContent = Number(els.autocorrHarmonicBias.value).toFixed(3);
+  els.yinThresholdValue.textContent = Number(els.yinThreshold.value).toFixed(2);
+  els.yinClarityValue.textContent = Number(els.yinClarity.value).toFixed(2);
+  els.mpmThresholdValue.textContent = Number(els.mpmThreshold.value).toFixed(2);
+  els.mpmClarityValue.textContent = Number(els.mpmClarity.value).toFixed(2);
 }
 
 function syncScaleControlState() {
   els.scaleRoot.disabled = els.scaleMode.value === "auto";
+}
+
+function syncPitchDetectorControlState() {
+  const activeType = els.pitchDetector.value;
+  for (const option of els.pitchDetectorOptions) {
+    option.hidden = option.dataset.detectorOption !== activeType;
+  }
+}
+
+function bindPitchDetectorSlider(input) {
+  input.addEventListener("input", syncControlLabels);
+  input.addEventListener("change", rerunPitchAnalysis);
+}
+
+function resetAllControlsToDefaults() {
+  if (state.mediaRecorder && state.mediaRecorder.state === "recording") {
+    setStatus("Stop recording before resetting defaults.");
+    return;
+  }
+
+  stopPlayback();
+  applyControlConfig();
+  els.scaleRoot.value = String(APP_CONFIG.autotune.defaultRoot);
+  els.scaleMode.value = APP_CONFIG.autotune.defaultModeId;
+  state.autotuneConfig = {
+    keyRoot: APP_CONFIG.autotune.defaultRoot,
+    modeId: APP_CONFIG.autotune.defaultModeId
+  };
+
+  syncScaleControlState();
+  syncPitchDetectorControlState();
+  syncControlLabels();
+
+  if (!state.analysis) {
+    setStatus("Defaults restored.");
+    return;
+  }
+
+  const detectorSettings = readPitchDetectorSettingsFromUi();
+  const { samples, sampleRate } = state.analysis;
+  state.analysis = analyzeAudio(samples, sampleRate, detectorSettings);
+  rerunDerivation();
+  renderSpectrogram();
+  setStatus(`Defaults restored. Detector: ${getPitchDetectorLabel(detectorSettings.type)}.`);
 }
 
 async function startRecording() {
@@ -273,14 +380,19 @@ async function handleRecordingStopped() {
     const arrayBuffer = await blob.arrayBuffer();
     const decoded = await state.audioContext.decodeAudioData(arrayBuffer.slice(0));
     const monoSamples = toMono(decoded);
-    state.analysis = analyzeAudio(monoSamples, decoded.sampleRate);
+    const pitchDetectorSettings = readPitchDetectorSettingsFromUi();
+    state.analysis = analyzeAudio(monoSamples, decoded.sampleRate, pitchDetectorSettings);
 
     rerunDerivation();
     renderVisuals();
     const activeScale = state.derived && state.derived.resolvedScale
       ? formatScaleName(state.derived.resolvedScale.keyRoot, state.derived.resolvedScale.modeId)
       : "n/a";
-    setStatus(`Processing complete. Pitch cap is ${APP_CONFIG.pitch.maxLabel}. Active scale: ${activeScale}.`);
+    setStatus(
+      `Processing complete. Pitch cap is ${APP_CONFIG.pitch.maxLabel}. ` +
+      `Detector: ${getPitchDetectorLabel(state.analysis.pitchDetector.type)}. ` +
+      `Active scale: ${activeScale}.`
+    );
   } catch (error) {
     setStatus(`Decode/analysis error: ${error.message}`);
   } finally {
@@ -333,6 +445,75 @@ function rerunDerivation() {
   els.playAutoBtn.disabled = autoNotes.length === 0;
 }
 
+function rerunPitchAnalysis() {
+  if (!state.analysis) {
+    return;
+  }
+
+  const detectorSettings = readPitchDetectorSettingsFromUi();
+  const { samples, sampleRate } = state.analysis;
+  stopPlayback();
+  state.analysis = analyzeAudio(samples, sampleRate, detectorSettings);
+  rerunDerivation();
+  renderSpectrogram();
+  setStatus(`Pitch detector updated: ${getPitchDetectorLabel(detectorSettings.type)}.`);
+}
+
+function readPitchDetectorSettingsFromUi() {
+  const defaults = APP_CONFIG.analysis.pitchDetector;
+  const selected = els.pitchDetector.value;
+  const type = selected === "yin" || selected === "mpm" ? selected : "autocorrelation";
+  return {
+    type,
+    autocorrelation: {
+      threshold: sanitizeNumericSetting(
+        els.autocorrThreshold.value,
+        APP_CONFIG.controls.autocorrThreshold,
+        defaults.autocorrelation.threshold
+      ),
+      harmonicBias: sanitizeNumericSetting(
+        els.autocorrHarmonicBias.value,
+        APP_CONFIG.controls.autocorrHarmonicBias,
+        defaults.autocorrelation.harmonicBias
+      )
+    },
+    yin: {
+      threshold: sanitizeNumericSetting(
+        els.yinThreshold.value,
+        APP_CONFIG.controls.yinThreshold,
+        defaults.yin.threshold
+      ),
+      minClarity: sanitizeNumericSetting(
+        els.yinClarity.value,
+        APP_CONFIG.controls.yinClarity,
+        defaults.yin.minClarity
+      )
+    },
+    mpm: {
+      threshold: sanitizeNumericSetting(
+        els.mpmThreshold.value,
+        APP_CONFIG.controls.mpmThreshold,
+        defaults.mpm.threshold
+      ),
+      minClarity: sanitizeNumericSetting(
+        els.mpmClarity.value,
+        APP_CONFIG.controls.mpmClarity,
+        defaults.mpm.minClarity
+      )
+    }
+  };
+}
+
+function getPitchDetectorLabel(type) {
+  if (type === "yin") {
+    return "YIN";
+  }
+  if (type === "mpm") {
+    return "MPM (McLeod)";
+  }
+  return "Autocorrelation";
+}
+
 function readAutotuneConfigFromUi() {
   const parsedRoot = Number(els.scaleRoot.value);
   const keyRoot = Number.isFinite(parsedRoot)
@@ -381,33 +562,29 @@ function detectBestScaleFromFrames(analysis, threshold, rawNotes) {
 
   let best = {
     keyRoot: APP_CONFIG.autotune.defaultRoot,
-    modeId: "major",
     score: Number.POSITIVE_INFINITY
   };
   let secondBestScore = Number.POSITIVE_INFINITY;
+  const mode = SCALE_BY_ID[AUTO_DETECT_MODE_ID] || SCALE_BY_ID.major;
+  const intervals = mode.intervals;
 
   for (let root = 0; root < NOTE_NAMES.length; root++) {
-    for (const modeId of AUTO_DETECT_MODE_IDS) {
-      const mode = SCALE_BY_ID[modeId];
-      const fitError = scaleFitError(voicedFrames, root, mode.intervals);
-      const outOfScaleRatio = computeOutOfScaleRatio(pitchClassHistogram, root, mode.intervals);
-      const tonicAffinity = computePitchClassAffinity(pitchClassHistogram, root);
-      const dominantAffinity = computePitchClassAffinity(pitchClassHistogram, (root + 7) % 12);
-      const cadenceAffinity = computeCadenceAffinity(cadenceProfile, root);
-      const complexityPenalty = Math.max(0, mode.intervals.length - 7) * APP_CONFIG.autotune.complexityPenaltyPerExtraDegree;
-      const score =
-        fitError +
-        outOfScaleRatio * APP_CONFIG.autotune.outOfScalePenaltyWeight +
-        complexityPenalty -
-        tonicAffinity * APP_CONFIG.autotune.tonicBiasWeight -
-        dominantAffinity * APP_CONFIG.autotune.dominantBiasWeight -
-        cadenceAffinity * APP_CONFIG.autotune.cadenceBiasWeight;
-      if (score < best.score) {
-        secondBestScore = best.score;
-        best = { keyRoot: root, modeId, score };
-      } else if (score < secondBestScore) {
-        secondBestScore = score;
-      }
+    const fitError = scaleFitError(voicedFrames, root, intervals);
+    const outOfScaleRatio = computeOutOfScaleRatio(pitchClassHistogram, root, intervals);
+    const tonicAffinity = computePitchClassAffinity(pitchClassHistogram, root);
+    const dominantAffinity = computePitchClassAffinity(pitchClassHistogram, (root + 7) % 12);
+    const cadenceAffinity = computeCadenceAffinity(cadenceProfile, root);
+    const score =
+      fitError +
+      outOfScaleRatio * APP_CONFIG.autotune.outOfScalePenaltyWeight -
+      tonicAffinity * APP_CONFIG.autotune.tonicBiasWeight -
+      dominantAffinity * APP_CONFIG.autotune.dominantBiasWeight -
+      cadenceAffinity * APP_CONFIG.autotune.cadenceBiasWeight;
+    if (score < best.score) {
+      secondBestScore = best.score;
+      best = { keyRoot: root, score };
+    } else if (score < secondBestScore) {
+      secondBestScore = score;
     }
   }
 
@@ -417,7 +594,7 @@ function detectBestScaleFromFrames(analysis, threshold, rawNotes) {
   const confidence = clamp(baseConfidence * 0.4 + marginConfidence * 0.6, 0, 1);
   return {
     keyRoot: best.keyRoot,
-    modeId: best.modeId,
+    modeId: AUTO_DETECT_MODE_ID,
     source: "auto",
     confidence
   };
@@ -524,10 +701,11 @@ function pitchClassDistance(pcA, pcB) {
   return Math.min(diff, 12 - diff);
 }
 
-function analyzeAudio(samples, sampleRate) {
+function analyzeAudio(samples, sampleRate, pitchDetectorSettings) {
   const frameSize = APP_CONFIG.analysis.pitchFrameSize;
   const hopSize = APP_CONFIG.analysis.pitchHopSize;
   const win = hannWindow(frameSize);
+  const detectorSettings = normalizePitchDetectorSettings(pitchDetectorSettings);
 
   const frameTimes = [];
   const rmsFrames = [];
@@ -540,7 +718,7 @@ function analyzeAudio(samples, sampleRate) {
       frame[i] = samples[start + i] * win[i];
     }
     const rms = computeRms(frame);
-    const f0 = estimateF0(frame, sampleRate);
+    const f0 = estimatePitch(frame, sampleRate, detectorSettings);
 
     frameTimes.push((start + frameSize * 0.5) / sampleRate);
     rmsFrames.push(rms);
@@ -559,7 +737,8 @@ function analyzeAudio(samples, sampleRate) {
     f0Hz,
     midiFrames,
     noiseFloor: detectNoiseFloor(rmsFrames),
-    spectrogram: computeSpectrogram(samples, sampleRate)
+    spectrogram: computeSpectrogram(samples, sampleRate),
+    pitchDetector: detectorSettings
   };
 }
 
@@ -1194,7 +1373,96 @@ function fftMagnitudes(input) {
   return mags;
 }
 
-function estimateF0(frame, sampleRate) {
+function normalizePitchDetectorSettings(settings) {
+  const defaults = APP_CONFIG.analysis.pitchDetector;
+  const source = settings || {};
+  const selectedType = source.type;
+  const type = selectedType === "yin" || selectedType === "mpm" || selectedType === "autocorrelation"
+    ? selectedType
+    : defaults.defaultType;
+
+  return {
+    type,
+    autocorrelation: {
+      threshold: sanitizeNumericSetting(
+        source.autocorrelation ? source.autocorrelation.threshold : undefined,
+        APP_CONFIG.controls.autocorrThreshold,
+        defaults.autocorrelation.threshold
+      ),
+      harmonicBias: sanitizeNumericSetting(
+        source.autocorrelation ? source.autocorrelation.harmonicBias : undefined,
+        APP_CONFIG.controls.autocorrHarmonicBias,
+        defaults.autocorrelation.harmonicBias
+      )
+    },
+    yin: {
+      threshold: sanitizeNumericSetting(
+        source.yin ? source.yin.threshold : undefined,
+        APP_CONFIG.controls.yinThreshold,
+        defaults.yin.threshold
+      ),
+      minClarity: sanitizeNumericSetting(
+        source.yin ? source.yin.minClarity : undefined,
+        APP_CONFIG.controls.yinClarity,
+        defaults.yin.minClarity
+      )
+    },
+    mpm: {
+      threshold: sanitizeNumericSetting(
+        source.mpm ? source.mpm.threshold : undefined,
+        APP_CONFIG.controls.mpmThreshold,
+        defaults.mpm.threshold
+      ),
+      minClarity: sanitizeNumericSetting(
+        source.mpm ? source.mpm.minClarity : undefined,
+        APP_CONFIG.controls.mpmClarity,
+        defaults.mpm.minClarity
+      )
+    }
+  };
+}
+
+function estimatePitch(frame, sampleRate, pitchDetectorSettings) {
+  const centered = preparePitchFrame(frame);
+  if (!centered) {
+    return 0;
+  }
+
+  const lagBounds = getPitchLagBounds(sampleRate, centered.length);
+  if (!lagBounds) {
+    return 0;
+  }
+
+  const config = pitchDetectorSettings && pitchDetectorSettings.type
+    ? pitchDetectorSettings
+    : normalizePitchDetectorSettings(pitchDetectorSettings);
+  let lagEstimate = 0;
+
+  if (config.type === "yin") {
+    lagEstimate = estimatePitchLagYin(centered, lagBounds.minLag, lagBounds.maxLag, config.yin);
+  } else if (config.type === "mpm") {
+    lagEstimate = estimatePitchLagMpm(centered, lagBounds.minLag, lagBounds.maxLag, config.mpm);
+  } else {
+    lagEstimate = estimatePitchLagAutocorrelation(
+      centered,
+      lagBounds.minLag,
+      lagBounds.maxLag,
+      config.autocorrelation
+    );
+  }
+
+  if (!(lagEstimate > 0)) {
+    return 0;
+  }
+
+  const pitchHz = sampleRate / lagEstimate;
+  if (pitchHz < APP_CONFIG.pitch.minHz || pitchHz > APP_CONFIG.pitch.maxHz) {
+    return 0;
+  }
+  return pitchHz;
+}
+
+function preparePitchFrame(frame) {
   const n = frame.length;
   let meanValue = 0;
   for (let i = 0; i < n; i++) {
@@ -1205,52 +1473,164 @@ function estimateF0(frame, sampleRate) {
   const centered = new Float32Array(n);
   let energy = 0;
   for (let i = 0; i < n; i++) {
-    const v = frame[i] - meanValue;
-    centered[i] = v;
-    energy += v * v;
+    const value = frame[i] - meanValue;
+    centered[i] = value;
+    energy += value * value;
   }
 
   if (energy / n < APP_CONFIG.analysis.minFrameEnergy) {
+    return null;
+  }
+  return centered;
+}
+
+function getPitchLagBounds(sampleRate, frameLength) {
+  const minLag = Math.max(2, Math.floor(sampleRate / APP_CONFIG.pitch.maxHz));
+  const maxLag = Math.min(frameLength - 2, Math.floor(sampleRate / APP_CONFIG.pitch.minHz));
+  if (maxLag <= minLag) {
+    return null;
+  }
+  return { minLag, maxLag };
+}
+
+function estimatePitchLagAutocorrelation(signal, minLag, maxLag, settings) {
+  let bestLag = -1;
+  let bestScore = Number.NEGATIVE_INFINITY;
+  let bestCorrelation = Number.NEGATIVE_INFINITY;
+
+  for (let lag = minLag; lag <= maxLag; lag++) {
+    const correlation = normalizedAutocorrelation(signal, lag);
+    const lagPosition = (lag - minLag) / Math.max(1, maxLag - minLag);
+    const score = correlation - settings.harmonicBias * lagPosition;
+    if (score > bestScore) {
+      bestScore = score;
+      bestLag = lag;
+      bestCorrelation = correlation;
+    }
+  }
+
+  if (bestLag < 0 || bestCorrelation < settings.threshold) {
     return 0;
   }
 
-  const minFreq = APP_CONFIG.pitch.minHz;
-  const maxFreq = APP_CONFIG.pitch.maxHz;
-  const minLag = Math.floor(sampleRate / maxFreq);
-  const maxLag = Math.min(n - 2, Math.floor(sampleRate / minFreq));
+  const center = normalizedAutocorrelation(signal, bestLag);
+  const left = bestLag > minLag ? normalizedAutocorrelation(signal, bestLag - 1) : center;
+  const right = bestLag < maxLag ? normalizedAutocorrelation(signal, bestLag + 1) : center;
+  return refineLagWithParabola(bestLag, left, center, right, minLag, maxLag);
+}
+
+function estimatePitchLagYin(signal, minLag, maxLag, settings) {
+  const difference = new Float32Array(maxLag + 1);
+  for (let lag = 1; lag <= maxLag; lag++) {
+    let sum = 0;
+    for (let i = 0; i < signal.length - lag; i++) {
+      const delta = signal[i] - signal[i + lag];
+      sum += delta * delta;
+    }
+    difference[lag] = sum;
+  }
+
+  const cmndf = new Float32Array(maxLag + 1);
+  cmndf[0] = 1;
+  let runningSum = 0;
+  for (let lag = 1; lag <= maxLag; lag++) {
+    runningSum += difference[lag];
+    cmndf[lag] = runningSum > 0 ? (difference[lag] * lag) / runningSum : 1;
+  }
 
   let bestLag = -1;
-  let bestCorr = 0;
+  let bestValue = 1;
   for (let lag = minLag; lag <= maxLag; lag++) {
-    const corr = normalizedAutocorrelation(centered, lag);
-    if (corr > bestCorr) {
-      bestCorr = corr;
+    const value = cmndf[lag];
+    if (value < bestValue) {
+      bestValue = value;
+      bestLag = lag;
+    }
+    if (value < settings.threshold) {
+      let localLag = lag;
+      let localValue = value;
+      while (localLag + 1 <= maxLag && cmndf[localLag + 1] <= localValue) {
+        localLag += 1;
+        localValue = cmndf[localLag];
+      }
+      bestLag = localLag;
+      bestValue = localValue;
+      break;
+    }
+  }
+
+  if (bestLag < 0) {
+    return 0;
+  }
+
+  const clarity = 1 - bestValue;
+  if (clarity < settings.minClarity) {
+    return 0;
+  }
+
+  const center = cmndf[bestLag];
+  const left = bestLag > minLag ? cmndf[bestLag - 1] : center;
+  const right = bestLag < maxLag ? cmndf[bestLag + 1] : center;
+  return refineLagWithParabola(bestLag, left, center, right, minLag, maxLag);
+}
+
+function estimatePitchLagMpm(signal, minLag, maxLag, settings) {
+  const nsdf = new Float32Array(maxLag + 1);
+  for (let lag = 0; lag <= maxLag; lag++) {
+    let acf = 0;
+    let norm = 0;
+    for (let i = 0; i < signal.length - lag; i++) {
+      const a = signal[i];
+      const b = signal[i + lag];
+      acf += a * b;
+      norm += a * a + b * b;
+    }
+    nsdf[lag] = norm > 1e-12 ? (2 * acf) / norm : 0;
+  }
+
+  let bestLag = -1;
+  let bestPeak = Number.NEGATIVE_INFINITY;
+  for (let lag = Math.max(minLag + 1, 1); lag < maxLag; lag++) {
+    const value = nsdf[lag];
+    if (value < settings.threshold) {
+      continue;
+    }
+    if (value >= nsdf[lag - 1] && value > nsdf[lag + 1] && value > bestPeak) {
+      bestPeak = value;
       bestLag = lag;
     }
   }
 
-  if (bestLag < 0 || bestCorr < APP_CONFIG.analysis.minF0Correlation) {
-    return 0;
-  }
-
-  let refinedLag = bestLag;
-  if (bestLag > minLag && bestLag < maxLag) {
-    const left = normalizedAutocorrelation(centered, bestLag - 1);
-    const right = normalizedAutocorrelation(centered, bestLag + 1);
-    const denominator = left - (2 * bestCorr) + right;
-    if (Math.abs(denominator) > 1e-7) {
-      const shift = 0.5 * (left - right) / denominator;
-      if (Math.abs(shift) < 1) {
-        refinedLag += shift;
+  if (bestLag < 0) {
+    for (let lag = minLag; lag <= maxLag; lag++) {
+      const value = nsdf[lag];
+      if (value > bestPeak) {
+        bestPeak = value;
+        bestLag = lag;
       }
     }
   }
 
-  const f0 = sampleRate / refinedLag;
-  if (f0 < minFreq || f0 > maxFreq) {
+  if (bestLag < 0 || bestPeak < settings.minClarity) {
     return 0;
   }
-  return f0;
+
+  const center = nsdf[bestLag];
+  const left = bestLag > minLag ? nsdf[bestLag - 1] : center;
+  const right = bestLag < maxLag ? nsdf[bestLag + 1] : center;
+  return refineLagWithParabola(bestLag, left, center, right, minLag, maxLag);
+}
+
+function refineLagWithParabola(centerLag, leftValue, centerValue, rightValue, minLag, maxLag) {
+  let refined = centerLag;
+  const denominator = leftValue - (2 * centerValue) + rightValue;
+  if (Math.abs(denominator) > 1e-7) {
+    const shift = 0.5 * (leftValue - rightValue) / denominator;
+    if (Math.abs(shift) < 1) {
+      refined += shift;
+    }
+  }
+  return clamp(refined, minLag, maxLag);
 }
 
 function normalizedAutocorrelation(signal, lag) {
@@ -1993,6 +2373,14 @@ function setStatus(text) {
 function createAudioContext() {
   const Ctx = window.AudioContext || window.webkitAudioContext;
   return new Ctx();
+}
+
+function sanitizeNumericSetting(value, range, fallback) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return fallback;
+  }
+  return clamp(numeric, range.min, range.max);
 }
 
 function clamp(value, min, max) {

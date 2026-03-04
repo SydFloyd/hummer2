@@ -71,6 +71,7 @@ p {
   display: flex;
   flex-wrap: wrap;
   gap: 0.6rem;
+  align-items: center;
 }
 
 button,
@@ -100,10 +101,6 @@ button:disabled {
   cursor: not-allowed;
 }
 
-#playScaleBtn {
-  margin-left: auto;
-}
-
 #startBtn {
   background: linear-gradient(140deg, rgba(54, 190, 157, 0.85), rgba(43, 130, 130, 0.8));
   border-color: rgba(124, 244, 203, 0.5);
@@ -113,10 +110,60 @@ button:disabled {
   border-color: rgba(240, 111, 116, 0.38);
 }
 
+.icon-reset {
+  width: 2.05rem;
+  height: 2.05rem;
+  border-radius: 999px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.08rem;
+  line-height: 1;
+  margin-left: auto;
+}
+
 .control-grid {
   margin-top: 0.9rem;
   display: grid;
-  grid-template-columns: repeat(7, minmax(90px, 1fr));
+  grid-template-columns: repeat(5, minmax(90px, 1fr));
+  gap: 0.75rem;
+  align-items: start;
+}
+
+.scale-control-row {
+  margin-top: 0.85rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid rgba(108, 205, 182, 0.22);
+  display: grid;
+  grid-template-columns: auto auto auto;
+  gap: 0.75rem;
+  align-items: end;
+  justify-content: start;
+}
+
+.scale-control-row label {
+  justify-self: start;
+}
+
+.scale-control-row #scaleRoot {
+  width: 8ch;
+}
+
+.scale-control-row #scaleMode {
+  width: 22ch;
+}
+
+.scale-control-row #playScaleBtn {
+  justify-self: end;
+}
+
+.pitch-detector-grid {
+  margin-top: 0.85rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid rgba(108, 205, 182, 0.22);
+  display: grid;
+  grid-template-columns: repeat(4, minmax(150px, 1fr));
   gap: 0.75rem;
   align-items: start;
 }
@@ -127,6 +174,10 @@ label {
   font-size: 0.86rem;
   color: var(--ink-muted);
   min-width: 0;
+}
+
+.pitch-detector-option[hidden] {
+  display: none !important;
 }
 
 label.inline {
@@ -163,6 +214,11 @@ input[type="range"] {
 #scaleMode {
   width: 100%;
   max-width: 100%;
+  min-width: 0;
+}
+
+#pitchDetector {
+  width: 100%;
   min-width: 0;
 }
 
@@ -259,5 +315,23 @@ tbody td {
   .control-grid {
     grid-template-columns: repeat(2, minmax(140px, 1fr));
     gap: 0.75rem;
+  }
+
+  .scale-control-row {
+    grid-template-columns: repeat(2, minmax(140px, 1fr));
+  }
+
+  .scale-control-row #scaleRoot,
+  .scale-control-row #scaleMode {
+    width: 100%;
+  }
+
+  .scale-control-row #playScaleBtn {
+    justify-self: stretch;
+    grid-column: 1 / -1;
+  }
+
+  .pitch-detector-grid {
+    grid-template-columns: repeat(2, minmax(140px, 1fr));
   }
 }
