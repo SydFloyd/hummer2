@@ -126,7 +126,7 @@ button:disabled {
 .control-grid {
   margin-top: 0.9rem;
   display: grid;
-  grid-template-columns: repeat(5, minmax(90px, 1fr));
+  grid-template-columns: repeat(6, minmax(90px, 1fr));
   gap: 0.75rem;
   align-items: start;
 }
@@ -151,7 +151,7 @@ button:disabled {
 }
 
 .scale-control-row #scaleMode {
-  width: 22ch;
+  width: 25ch;
 }
 
 .scale-control-row #playScaleBtn {
@@ -190,6 +190,12 @@ label.inline {
 .playback-toggle {
   font-size: 0.84rem;
   white-space: nowrap;
+}
+
+.pitch-downsample-toggle {
+  font-size: 0.84rem;
+  white-space: nowrap;
+  align-self: end;
 }
 
 input[type="checkbox"] {

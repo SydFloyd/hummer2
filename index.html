@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Hummer Audio-to-MIDI Tester</title>
+  <title>Hummer Audio-to-MIDI Lab</title>
   <link rel="icon" type="image/png" sizes="32x32" href="assets/hummer_logo_32.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -15,7 +15,7 @@
     <header class="app-header">
       <img src="assets/hummer_logo.png" alt="Hummer logo" class="logo">
       <div>
-        <h1>Audio-to-MIDI Tester</h1>
+        <h1>Audio-to-MIDI Lab</h1>
         <p>Record a hum, inspect signal features, and audition derived notes.</p>
       </div>
     </header>
@@ -24,6 +24,7 @@
       <div class="button-row">
         <button id="startBtn">Start Recording</button>
         <button id="stopBtn" disabled>Stop Recording</button>
+        <button id="playOriginalBtn" disabled>Play Original</button>
         <button id="playRawBendBtn" disabled>Play Raw + Bend</button>
         <button id="playRawBtn" disabled>Play Raw Pitch</button>
         <button id="playAutoBtn" disabled>Play Autotuned</button>
@@ -51,6 +52,11 @@
           <span id="pitchJumpSplitValue">1.2</span>
         </label>
         <label>
+          Max Note Jump (st)
+          <input id="maxNoteJump" type="range" min="0" max="24" step="0.5" value="12">
+          <span id="maxNoteJumpValue">12.0</span>
+        </label>
+        <label>
           Note Derivation
           <select id="noteDerivation">
             <option value="mean" selected>Mean</option>
@@ -62,18 +68,6 @@
           <input id="bendSmoothing" type="range" min="0" max="100" step="1" value="35">
           <span id="bendSmoothingValue">35%</span>
         </label>
-      </div>
-
-      <div class="scale-control-row">
-        <label>
-          Scale Root
-          <select id="scaleRoot"></select>
-        </label>
-        <label>
-          Scale Mode
-          <select id="scaleMode"></select>
-        </label>
-        <button id="playScaleBtn">Play Scale</button>
       </div>
 
       <div class="pitch-detector-grid">
@@ -115,6 +109,22 @@
           <input id="mpmClarity" type="range" min="0.1" max="0.99" step="0.01" value="0.55">
           <span id="mpmClarityValue">0.55</span>
         </label>
+        <label class="inline pitch-downsample-toggle">
+          <input id="downsamplePitch" type="checkbox" checked>
+          Downsample (Faster)
+        </label>
+      </div>
+
+      <div class="scale-control-row">
+        <label>
+          Scale Root
+          <select id="scaleRoot"></select>
+        </label>
+        <label>
+          Scale Mode
+          <select id="scaleMode"></select>
+        </label>
+        <button id="playScaleBtn">Play Scale</button>
       </div>
     </section>
 
@@ -136,7 +146,7 @@
 
     <section class="panel viz-panel">
       <h2>Waveform + RMS Envelope</h2>
-      <canvas id="waveCanvas" width="1200" height="260"></canvas>
+      <canvas id="waveCanvas" width="1200" height="156"></canvas>
     </section>
 
     <section class="panel viz-panel">

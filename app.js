@@ -24,6 +24,7 @@ const APP_CONFIG = {
     gateMultiplier: { min: 1.2, max: 6, step: 0.1, defaultValue: 2.5 },
     minNoteMs: { min: 20, max: 300, step: 5, defaultValue: 25 },
     pitchJumpSplit: { min: 0, max: 6, step: 0.1, defaultValue: 0.6 },
+    maxNoteJump: { min: 0, max: 24, step: 0.5, defaultValue: 18 },
     bendSmoothing: { min: 0, max: 100, step: 1, defaultValue: 35 },
     autocorrThreshold: { min: 0.1, max: 0.95, step: 0.01, defaultValue: 0.35 },
     autocorrHarmonicBias: { min: 0, max: 0.25, step: 0.005, defaultValue: 0.05 },
@@ -45,9 +46,11 @@ const APP_CONFIG = {
     spectrogramFrameSize: 1024,
     spectrogramHopSize: 256,
     spectrogramMaxFreq: 4500,
+    trimTailMs: 100,
     minFrameEnergy: 1e-7,
     pitchDetector: {
       defaultType: "autocorrelation",
+      downsampleFactor: 2,
       autocorrelation: {
         threshold: 0.35,
         harmonicBias: 0.05
@@ -107,6 +110,7 @@ const state = {
   mediaStream: null,
   audioContext: null,
   recordedChunks: [],
+  originalAudioBuffer: null,
   analysis: null,
   derived: null,
   playbackContext: null,
@@ -120,18 +124,22 @@ const state = {
 const els = {
   startBtn: document.getElementById("startBtn"),
   stopBtn: document.getElementById("stopBtn"),
+  playOriginalBtn: document.getElementById("playOriginalBtn"),
   playRawBendBtn: document.getElementById("playRawBendBtn"),
   playRawBtn: document.getElementById("playRawBtn"),
   playAutoBtn: document.getElementById("playAutoBtn"),
   playScaleBtn: document.getElementById("playScaleBtn"),
   resetDefaultsBtn: document.getElementById("resetDefaultsBtn"),
   continuousDynamics: document.getElementById("continuousDynamics"),
+  downsamplePitch: document.getElementById("downsamplePitch"),
   gateMultiplier: document.getElementById("gateMultiplier"),
   gateMultiplierValue: document.getElementById("gateMultiplierValue"),
   minNoteMs: document.getElementById("minNoteMs"),
   minNoteMsValue: document.getElementById("minNoteMsValue"),
   pitchJumpSplit: document.getElementById("pitchJumpSplit"),
   pitchJumpSplitValue: document.getElementById("pitchJumpSplitValue"),
+  maxNoteJump: document.getElementById("maxNoteJump"),
+  maxNoteJumpValue: document.getElementById("maxNoteJumpValue"),
   bendSmoothing: document.getElementById("bendSmoothing"),
   bendSmoothingValue: document.getElementById("bendSmoothingValue"),
   pitchDetector: document.getElementById("pitchDetector"),
@@ -180,6 +188,7 @@ function applyControlConfig() {
   applyRangeConfig(els.gateMultiplier, APP_CONFIG.controls.gateMultiplier);
   applyRangeConfig(els.minNoteMs, APP_CONFIG.controls.minNoteMs);
   applyRangeConfig(els.pitchJumpSplit, APP_CONFIG.controls.pitchJumpSplit);
+  applyRangeConfig(els.maxNoteJump, APP_CONFIG.controls.maxNoteJump);
   applyRangeConfig(els.bendSmoothing, APP_CONFIG.controls.bendSmoothing);
   applyRangeConfig(els.autocorrThreshold, APP_CONFIG.controls.autocorrThreshold);
   applyRangeConfig(els.autocorrHarmonicBias, APP_CONFIG.controls.autocorrHarmonicBias);
@@ -190,6 +199,7 @@ function applyControlConfig() {
   els.noteDerivation.value = APP_CONFIG.detection.rawPitchReducer;
   els.pitchDetector.value = APP_CONFIG.analysis.pitchDetector.defaultType;
   els.continuousDynamics.checked = DEFAULT_CONTINUOUS_DYNAMICS;
+  els.downsamplePitch.checked = APP_CONFIG.analysis.pitchDetector.downsampleFactor > 1;
 }
 
 function applyRangeConfig(input, config) {
@@ -226,6 +236,7 @@ function populateScaleControls() {
 function wireEvents() {
   els.startBtn.addEventListener("click", startRecording);
   els.stopBtn.addEventListener("click", stopRecording);
+  els.playOriginalBtn.addEventListener("click", playOriginalSample);
   els.playRawBendBtn.addEventListener("click", playRawBend);
   els.playRawBtn.addEventListener("click", () => playNotes("raw"));
   els.playAutoBtn.addEventListener("click", () => playNotes("auto"));
@@ -244,7 +255,12 @@ function wireEvents() {
     syncControlLabels();
     rerunDerivation();
   });
+  els.maxNoteJump.addEventListener("input", () => {
+    syncControlLabels();
+    rerunDerivation();
+  });
   els.bendSmoothing.addEventListener("input", syncControlLabels);
+  els.downsamplePitch.addEventListener("change", rerunPitchAnalysis);
   els.pitchDetector.addEventListener("change", () => {
     syncPitchDetectorControlState();
     syncControlLabels();
@@ -268,6 +284,8 @@ function syncControlLabels() {
   els.gateMultiplierValue.textContent = `${Number(els.gateMultiplier.value).toFixed(1)}x`;
   els.minNoteMsValue.textContent = String(Number(els.minNoteMs.value));
   els.pitchJumpSplitValue.textContent = Number(els.pitchJumpSplit.value).toFixed(1);
+  const maxJump = Number(els.maxNoteJump.value);
+  els.maxNoteJumpValue.textContent = maxJump <= 0 ? "off" : maxJump.toFixed(1);
   els.bendSmoothingValue.textContent = `${Math.round(Number(els.bendSmoothing.value))}%`;
   els.autocorrThresholdValue.textContent = Number(els.autocorrThreshold.value).toFixed(2);
   els.autocorrHarmonicBiasValue.textContent = Number(els.autocorrHarmonicBias.value).toFixed(3);
@@ -318,8 +336,9 @@ function resetAllControlsToDefaults() {
   }
 
   const detectorSettings = readPitchDetectorSettingsFromUi();
-  const { samples, sampleRate } = state.analysis;
-  state.analysis = analyzeAudio(samples, sampleRate, detectorSettings);
+  const previousAnalysis = state.analysis;
+  const { samples, sampleRate } = previousAnalysis;
+  state.analysis = analyzeAudio(samples, sampleRate, detectorSettings, previousAnalysis);
   rerunDerivation();
   renderSpectrogram();
   setStatus(`Defaults restored. Detector: ${getPitchDetectorLabel(detectorSettings.type)}.`);
@@ -352,6 +371,7 @@ async function startRecording() {
     setStatus("Recording... hum or sing a phrase, then stop.");
     els.startBtn.disabled = true;
     els.stopBtn.disabled = false;
+    els.playOriginalBtn.disabled = true;
     els.playRawBtn.disabled = true;
     els.playRawBendBtn.disabled = true;
     els.playAutoBtn.disabled = true;
@@ -379,9 +399,11 @@ async function handleRecordingStopped() {
     const blob = new Blob(state.recordedChunks, { type: state.mediaRecorder.mimeType || "audio/webm" });
     const arrayBuffer = await blob.arrayBuffer();
     const decoded = await state.audioContext.decodeAudioData(arrayBuffer.slice(0));
-    const monoSamples = toMono(decoded);
+    const trimmedDecoded = trimAudioBufferTail(decoded, APP_CONFIG.analysis.trimTailMs, state.audioContext);
+    state.originalAudioBuffer = trimmedDecoded;
+    const monoSamples = toMono(trimmedDecoded);
     const pitchDetectorSettings = readPitchDetectorSettingsFromUi();
-    state.analysis = analyzeAudio(monoSamples, decoded.sampleRate, pitchDetectorSettings);
+    state.analysis = analyzeAudio(monoSamples, trimmedDecoded.sampleRate, pitchDetectorSettings);
 
     rerunDerivation();
     renderVisuals();
@@ -394,12 +416,14 @@ async function handleRecordingStopped() {
       `Active scale: ${activeScale}.`
     );
   } catch (error) {
+    state.originalAudioBuffer = null;
     setStatus(`Decode/analysis error: ${error.message}`);
   } finally {
     if (state.mediaStream) {
       state.mediaStream.getTracks().forEach((track) => track.stop());
     }
     els.startBtn.disabled = false;
+    els.playOriginalBtn.disabled = !state.originalAudioBuffer;
     els.playScaleBtn.disabled = false;
   }
 }
@@ -413,13 +437,15 @@ function rerunDerivation() {
   const gateMultiplier = Number(els.gateMultiplier.value);
   const minNoteMs = Number(els.minNoteMs.value);
   const pitchJumpSplitSemitones = Number(els.pitchJumpSplit.value);
+  const maxNoteJumpSemitones = Number(els.maxNoteJump.value);
   const threshold = state.analysis.noiseFloor * gateMultiplier + APP_CONFIG.detection.gateOffset;
   const rawNotes = deriveRawNotes(
     state.analysis,
     threshold,
     minNoteMs,
     els.noteDerivation.value,
-    pitchJumpSplitSemitones
+    pitchJumpSplitSemitones,
+    maxNoteJumpSemitones
   );
   const resolvedScale = resolveAutotuneScale(state.analysis, threshold, state.autotuneConfig, rawNotes);
   if (state.autotuneConfig.modeId === "auto") {
@@ -451,9 +477,10 @@ function rerunPitchAnalysis() {
   }
 
   const detectorSettings = readPitchDetectorSettingsFromUi();
-  const { samples, sampleRate } = state.analysis;
+  const previousAnalysis = state.analysis;
+  const { samples, sampleRate } = previousAnalysis;
   stopPlayback();
-  state.analysis = analyzeAudio(samples, sampleRate, detectorSettings);
+  state.analysis = analyzeAudio(samples, sampleRate, detectorSettings, previousAnalysis);
   rerunDerivation();
   renderSpectrogram();
   setStatus(`Pitch detector updated: ${getPitchDetectorLabel(detectorSettings.type)}.`);
@@ -463,8 +490,11 @@ function readPitchDetectorSettingsFromUi() {
   const defaults = APP_CONFIG.analysis.pitchDetector;
   const selected = els.pitchDetector.value;
   const type = selected === "yin" || selected === "mpm" ? selected : "autocorrelation";
+  const configuredFactor = Math.max(1, Math.floor(defaults.downsampleFactor || 1));
+  const downsampleFactor = els.downsamplePitch.checked ? configuredFactor : 1;
   return {
     type,
+    downsampleFactor,
     autocorrelation: {
       threshold: sanitizeNumericSetting(
         els.autocorrThreshold.value,
@@ -701,14 +731,25 @@ function pitchClassDistance(pcA, pcB) {
   return Math.min(diff, 12 - diff);
 }
 
-function analyzeAudio(samples, sampleRate, pitchDetectorSettings) {
+function analyzeAudio(samples, sampleRate, pitchDetectorSettings, reuseAnalysis) {
   const frameSize = APP_CONFIG.analysis.pitchFrameSize;
   const hopSize = APP_CONFIG.analysis.pitchHopSize;
   const win = hannWindow(frameSize);
   const detectorSettings = normalizePitchDetectorSettings(pitchDetectorSettings);
+  const canReuseBaseAnalysis =
+    reuseAnalysis &&
+    reuseAnalysis.sampleRate === sampleRate &&
+    reuseAnalysis.frameSize === frameSize &&
+    reuseAnalysis.hopSize === hopSize &&
+    reuseAnalysis.samples &&
+    reuseAnalysis.samples.length === samples.length &&
+    Array.isArray(reuseAnalysis.frameTimes) &&
+    Array.isArray(reuseAnalysis.rmsFrames) &&
+    Number.isFinite(reuseAnalysis.noiseFloor) &&
+    reuseAnalysis.spectrogram;
 
-  const frameTimes = [];
-  const rmsFrames = [];
+  const frameTimes = canReuseBaseAnalysis ? reuseAnalysis.frameTimes : [];
+  const rmsFrames = canReuseBaseAnalysis ? reuseAnalysis.rmsFrames : [];
   const f0Hz = [];
   const midiFrames = [];
 
@@ -717,11 +758,13 @@ function analyzeAudio(samples, sampleRate, pitchDetectorSettings) {
     for (let i = 0; i < frameSize; i++) {
       frame[i] = samples[start + i] * win[i];
     }
-    const rms = computeRms(frame);
     const f0 = estimatePitch(frame, sampleRate, detectorSettings);
 
-    frameTimes.push((start + frameSize * 0.5) / sampleRate);
-    rmsFrames.push(rms);
+    if (!canReuseBaseAnalysis) {
+      const rms = computeRms(frame);
+      frameTimes.push((start + frameSize * 0.5) / sampleRate);
+      rmsFrames.push(rms);
+    }
     f0Hz.push(f0);
     midiFrames.push(f0 > 0 ? clampPitchMidi(hzToMidi(f0)) : null);
   }
@@ -736,8 +779,8 @@ function analyzeAudio(samples, sampleRate, pitchDetectorSettings) {
     rmsFrames,
     f0Hz,
     midiFrames,
-    noiseFloor: detectNoiseFloor(rmsFrames),
-    spectrogram: computeSpectrogram(samples, sampleRate),
+    noiseFloor: canReuseBaseAnalysis ? reuseAnalysis.noiseFloor : detectNoiseFloor(rmsFrames),
+    spectrogram: canReuseBaseAnalysis ? reuseAnalysis.spectrogram : computeSpectrogram(samples, sampleRate),
     pitchDetector: detectorSettings
   };
 }
@@ -758,7 +801,14 @@ function detectNoiseFloor(rmsFrames) {
   return sum / quietCount;
 }
 
-function deriveRawNotes(analysis, threshold, minNoteMs, pitchReducer, pitchJumpSplitSemitones) {
+function deriveRawNotes(
+  analysis,
+  threshold,
+  minNoteMs,
+  pitchReducer,
+  pitchJumpSplitSemitones,
+  maxNoteJumpSemitones
+) {
   const notes = [];
   const endHoldFrames = APP_CONFIG.detection.endHoldFrames;
   let active = false;
@@ -804,7 +854,32 @@ function deriveRawNotes(analysis, threshold, minNoteMs, pitchReducer, pitchJumpS
   if (active) {
     flushNote(analysis.frameTimes.length - 1);
   }
-  return notes;
+  return filterNotesByMaxJump(notes, maxNoteJumpSemitones);
+}
+
+function filterNotesByMaxJump(notes, maxJumpSemitones) {
+  const threshold = Number(maxJumpSemitones) || 0;
+  if (threshold <= 0 || notes.length <= 1) {
+    return notes;
+  }
+
+  const filtered = [notes[0]];
+  let lastKeptMidi = notes[0].rawMidi;
+
+  for (let i = 1; i < notes.length; i++) {
+    const note = notes[i];
+    if (!Number.isFinite(note.rawMidi) || !Number.isFinite(lastKeptMidi)) {
+      filtered.push(note);
+      lastKeptMidi = note.rawMidi;
+      continue;
+    }
+    if (Math.abs(note.rawMidi - lastKeptMidi) <= threshold) {
+      filtered.push(note);
+      lastKeptMidi = note.rawMidi;
+    }
+  }
+
+  return filtered;
 }
 
 function splitGatedSegmentIntoNotes(
@@ -1383,6 +1458,7 @@ function normalizePitchDetectorSettings(settings) {
 
   return {
     type,
+    downsampleFactor: Math.max(1, Math.floor(source.downsampleFactor || defaults.downsampleFactor || 1)),
     autocorrelation: {
       threshold: sanitizeNumericSetting(
         source.autocorrelation ? source.autocorrelation.threshold : undefined,
@@ -1428,23 +1504,27 @@ function estimatePitch(frame, sampleRate, pitchDetectorSettings) {
     return 0;
   }
 
-  const lagBounds = getPitchLagBounds(sampleRate, centered.length);
-  if (!lagBounds) {
-    return 0;
-  }
-
   const config = pitchDetectorSettings && pitchDetectorSettings.type
     ? pitchDetectorSettings
     : normalizePitchDetectorSettings(pitchDetectorSettings);
+  const downsampled = downsamplePitchSignal(
+    centered,
+    sampleRate,
+    config.downsampleFactor
+  );
+  const lagBounds = getPitchLagBounds(downsampled.sampleRate, downsampled.signal.length);
+  if (!lagBounds) {
+    return 0;
+  }
   let lagEstimate = 0;
 
   if (config.type === "yin") {
-    lagEstimate = estimatePitchLagYin(centered, lagBounds.minLag, lagBounds.maxLag, config.yin);
+    lagEstimate = estimatePitchLagYin(downsampled.signal, lagBounds.minLag, lagBounds.maxLag, config.yin);
   } else if (config.type === "mpm") {
-    lagEstimate = estimatePitchLagMpm(centered, lagBounds.minLag, lagBounds.maxLag, config.mpm);
+    lagEstimate = estimatePitchLagMpm(downsampled.signal, lagBounds.minLag, lagBounds.maxLag, config.mpm);
   } else {
     lagEstimate = estimatePitchLagAutocorrelation(
-      centered,
+      downsampled.signal,
       lagBounds.minLag,
       lagBounds.maxLag,
       config.autocorrelation
@@ -1455,7 +1535,7 @@ function estimatePitch(frame, sampleRate, pitchDetectorSettings) {
     return 0;
   }
 
-  const pitchHz = sampleRate / lagEstimate;
+  const pitchHz = downsampled.sampleRate / lagEstimate;
   if (pitchHz < APP_CONFIG.pitch.minHz || pitchHz > APP_CONFIG.pitch.maxHz) {
     return 0;
   }
@@ -1493,13 +1573,42 @@ function getPitchLagBounds(sampleRate, frameLength) {
   return { minLag, maxLag };
 }
 
+function downsamplePitchSignal(signal, sampleRate, downsampleFactor) {
+  const factor = Math.max(1, Math.floor(downsampleFactor || 1));
+  if (factor <= 1 || signal.length < factor * 8) {
+    return { signal, sampleRate };
+  }
+
+  const downsampledLength = Math.floor(signal.length / factor);
+  if (downsampledLength < 32) {
+    return { signal, sampleRate };
+  }
+
+  const downsampled = new Float32Array(downsampledLength);
+  for (let i = 0; i < downsampledLength; i++) {
+    const base = i * factor;
+    let sum = 0;
+    for (let j = 0; j < factor; j++) {
+      sum += signal[base + j];
+    }
+    downsampled[i] = sum / factor;
+  }
+
+  return {
+    signal: downsampled,
+    sampleRate: sampleRate / factor
+  };
+}
+
 function estimatePitchLagAutocorrelation(signal, minLag, maxLag, settings) {
   let bestLag = -1;
   let bestScore = Number.NEGATIVE_INFINITY;
   let bestCorrelation = Number.NEGATIVE_INFINITY;
+  const correlations = new Float32Array(maxLag + 1);
 
   for (let lag = minLag; lag <= maxLag; lag++) {
     const correlation = normalizedAutocorrelation(signal, lag);
+    correlations[lag] = correlation;
     const lagPosition = (lag - minLag) / Math.max(1, maxLag - minLag);
     const score = correlation - settings.harmonicBias * lagPosition;
     if (score > bestScore) {
@@ -1513,9 +1622,9 @@ function estimatePitchLagAutocorrelation(signal, minLag, maxLag, settings) {
     return 0;
   }
 
-  const center = normalizedAutocorrelation(signal, bestLag);
-  const left = bestLag > minLag ? normalizedAutocorrelation(signal, bestLag - 1) : center;
-  const right = bestLag < maxLag ? normalizedAutocorrelation(signal, bestLag + 1) : center;
+  const center = correlations[bestLag];
+  const left = bestLag > minLag ? correlations[bestLag - 1] : center;
+  const right = bestLag < maxLag ? correlations[bestLag + 1] : center;
   return refineLagWithParabola(bestLag, left, center, right, minLag, maxLag);
 }
 
@@ -1762,6 +1871,35 @@ function playNotes(mode) {
   }, totalMs + 100);
 
   setStatus(mode === "raw" ? "Playing raw vocal pitch..." : "Playing autotuned note sequence...");
+}
+
+function playOriginalSample() {
+  if (!state.originalAudioBuffer) {
+    setStatus("No original recording available yet.");
+    return;
+  }
+
+  stopPlayback();
+  const ctx = createAudioContext();
+  state.playbackContext = ctx;
+
+  const source = ctx.createBufferSource();
+  source.buffer = state.originalAudioBuffer;
+  const gain = ctx.createGain();
+  gain.gain.value = 0.95;
+  source.connect(gain).connect(ctx.destination);
+
+  const startAt = ctx.currentTime + 0.03;
+  source.start(startAt);
+  source.stop(startAt + state.originalAudioBuffer.duration);
+
+  const totalMs = Math.max(200, state.originalAudioBuffer.duration * 1000);
+  state.playbackEndTimer = setTimeout(() => {
+    stopPlayback();
+    setStatus("Playback complete.");
+  }, totalMs + 110);
+
+  setStatus("Playing original recording...");
 }
 
 function playRawBend() {
@@ -2314,6 +2452,21 @@ function toMono(audioBuffer) {
     }
   }
   return mono;
+}
+
+function trimAudioBufferTail(audioBuffer, trimMs, audioContext) {
+  const trimSamples = Math.max(0, Math.floor(audioBuffer.sampleRate * (Math.max(0, trimMs) / 1000)));
+  if (trimSamples <= 0 || trimSamples >= audioBuffer.length || !audioContext) {
+    return audioBuffer;
+  }
+
+  const trimmedLength = Math.max(1, audioBuffer.length - trimSamples);
+  const trimmed = audioContext.createBuffer(audioBuffer.numberOfChannels, trimmedLength, audioBuffer.sampleRate);
+  for (let channel = 0; channel < audioBuffer.numberOfChannels; channel++) {
+    const source = audioBuffer.getChannelData(channel).subarray(0, trimmedLength);
+    trimmed.copyToChannel(source, channel);
+  }
+  return trimmed;
 }
 
 function hannWindow(size) {
