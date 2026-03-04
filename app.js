@@ -87,6 +87,7 @@ const APP_CONFIG = {
     endHoldFrames: 1,
     pitchRecoverySearchRadius: 4,
     rawPitchReducer: "mean",
+    tailWeightedMeanPower: 2.2,
     pitchJumpConfirmFrames: 2,
     pitchJumpReferenceFrames: 6,
     pitchJumpMinFramesBetweenSplits: 3
@@ -3487,7 +3488,13 @@ function clampPitchMidi(midi) {
 }
 
 function reducePitchPool(values, reducerMode) {
-  return reducerMode === "median" ? median(values) : mean(values);
+  if (reducerMode === "median") {
+    return median(values);
+  }
+  if (reducerMode === "tailWeightedMean") {
+    return tailWeightedMean(values, APP_CONFIG.detection.tailWeightedMeanPower);
+  }
+  return mean(values);
 }
 
 function percentile(values, fraction) {
@@ -3514,4 +3521,21 @@ function median(values) {
     return (sorted[mid - 1] + sorted[mid]) * 0.5;
   }
   return sorted[mid];
+}
+
+function tailWeightedMean(values, power) {
+  if (!values.length) {
+    return 0;
+  }
+  const exponent = Math.max(1, Number(power) || 1);
+  const count = values.length;
+  let weightedSum = 0;
+  let weightTotal = 0;
+  for (let i = 0; i < count; i++) {
+    const progress = (i + 1) / count;
+    const weight = Math.pow(progress, exponent);
+    weightedSum += values[i] * weight;
+    weightTotal += weight;
+  }
+  return weightTotal > 0 ? weightedSum / weightTotal : mean(values);
 }
