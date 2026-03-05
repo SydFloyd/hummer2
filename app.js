@@ -128,6 +128,47 @@ const APP_CONFIG = {
   }
 };
 
+const PRESET_SCHEMA_VERSION = 1;
+const SHARED_PRESET_MANIFEST_PATH = "presets/index.json";
+const PRESET_CONTROL_SPECS = [
+  { id: "gateMultiplier", type: "number" },
+  { id: "minNoteMs", type: "number" },
+  { id: "pitchJumpSplit", type: "number" },
+  { id: "maxNoteJump", type: "number" },
+  { id: "noteDerivation", type: "string" },
+  { id: "bendSmoothing", type: "number" },
+  { id: "pitchDetector", type: "string" },
+  { id: "autocorrThreshold", type: "number" },
+  { id: "autocorrHarmonicBias", type: "number" },
+  { id: "yinThreshold", type: "number" },
+  { id: "yinClarity", type: "number" },
+  { id: "mpmThreshold", type: "number" },
+  { id: "mpmClarity", type: "number" },
+  { id: "downsamplePitch", type: "boolean" },
+  { id: "scaleRoot", type: "string" },
+  { id: "scaleMode", type: "string" },
+  { id: "synthOscillator", type: "string" },
+  { id: "synthFilterType", type: "string" },
+  { id: "synthFilterQ", type: "number" },
+  { id: "synthFilterCutoff", type: "number" },
+  { id: "synthKeyboardTrackingPct", type: "number" },
+  { id: "synthFilterEnvDepth", type: "number" },
+  { id: "synthAttackMs", type: "number" },
+  { id: "synthDecayMs", type: "number" },
+  { id: "synthSustainPct", type: "number" },
+  { id: "synthReleaseMs", type: "number" },
+  { id: "ampAttackMs", type: "number" },
+  { id: "ampDecayMs", type: "number" },
+  { id: "ampSustainPct", type: "number" },
+  { id: "ampReleaseMs", type: "number" },
+  { id: "synthVoice2Enabled", type: "boolean" },
+  { id: "synthVoice2Detune", type: "number" },
+  { id: "synthVoice2Mix", type: "number" },
+  { id: "synthOutputGain", type: "number" },
+  { id: "continuousDynamics", type: "boolean" }
+];
+const PRESET_PLAY_MODES = ["rawBend", "raw", "auto", "original"];
+
 const state = {
   mediaRecorder: null,
   mediaStream: null,
@@ -145,6 +186,8 @@ const state = {
   loopPlayback: false,
   controlsCollapsed: true,
   synthPanelCollapsed: true,
+  presetManifest: [],
+  presetCache: {},
   autotuneConfig: {
     keyRoot: APP_CONFIG.autotune.defaultRoot,
     modeId: APP_CONFIG.autotune.defaultModeId
@@ -161,6 +204,10 @@ const els = {
   toggleControlsBtn: document.getElementById("toggleControlsBtn"),
   toggleSynthPanelBtn: document.getElementById("toggleSynthPanelBtn"),
   resetDefaultsBtn: document.getElementById("resetDefaultsBtn"),
+  presetSelect: document.getElementById("presetSelect"),
+  exportPresetBtn: document.getElementById("exportPresetBtn"),
+  importPresetBtn: document.getElementById("importPresetBtn"),
+  presetFileInput: document.getElementById("presetFileInput"),
   synthTestBtn: document.getElementById("synthTestBtn"),
   selectionPanel: document.getElementById("selectionPanel"),
   synthSelectionPanel: document.getElementById("synthSelectionPanel"),
@@ -243,6 +290,7 @@ bootstrap();
 function bootstrap() {
   applyControlConfig();
   populateScaleControls();
+  populatePresetControls();
   wireEvents();
   syncControlLabels();
   syncLoopToggleState();
@@ -255,6 +303,7 @@ function bootstrap() {
   drawPlaceholder(els.waveCanvas, "Record audio to view waveform and RMS.");
   drawPlaceholder(els.specCanvas, "Stop recording to generate spectrogram and pitch track.");
   drawPlaceholder(els.midiCanvas, "Derived MIDI timeline appears after processing.");
+  initializeSharedPresetLibrary();
 }
 
 function applyControlConfig() {
@@ -324,6 +373,13 @@ function populateScaleControls() {
   syncScaleControlState();
 }
 
+function populatePresetControls() {
+  if (!els.presetSelect) {
+    return;
+  }
+  els.presetSelect.innerHTML = "";
+}
+
 function wireEvents() {
   els.startBtn.addEventListener("click", startRecording);
   els.stopBtn.addEventListener("click", handleStopButtonPress);
@@ -336,6 +392,16 @@ function wireEvents() {
   els.toggleControlsBtn.addEventListener("click", toggleControlsPanel);
   els.toggleSynthPanelBtn.addEventListener("click", toggleSynthPanel);
   els.resetDefaultsBtn.addEventListener("click", resetAllControlsToDefaults);
+  if (els.presetSelect) {
+    els.presetSelect.addEventListener("change", onPresetSelectChanged);
+  }
+  if (els.exportPresetBtn) {
+    els.exportPresetBtn.addEventListener("click", exportCurrentPresetToFile);
+  }
+  if (els.importPresetBtn && els.presetFileInput) {
+    els.importPresetBtn.addEventListener("click", () => els.presetFileInput.click());
+    els.presetFileInput.addEventListener("change", importPresetFromFile);
+  }
   els.synthTestBtn.addEventListener("pointerdown", handleSynthTestPointerDown);
   els.synthTestBtn.addEventListener("pointerup", handleSynthTestPointerUp);
   els.synthTestBtn.addEventListener("pointercancel", handleSynthTestPointerUp);
@@ -648,6 +714,268 @@ function bindSynthSlider(input) {
     schedulePlaybackRefresh();
   });
   input.addEventListener("change", schedulePlaybackRefresh);
+}
+
+async function initializeSharedPresetLibrary() {
+  if (!els.presetSelect) {
+    return;
+  }
+  try {
+    const response = await fetch(SHARED_PRESET_MANIFEST_PATH, { cache: "no-store" });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    const manifest = await response.json();
+    const entries = Array.isArray(manifest.presets) ? manifest.presets : [];
+    state.presetManifest = entries.filter((entry) =>
+      entry &&
+      typeof entry.id === "string" &&
+      entry.id.trim() &&
+      typeof entry.file === "string" &&
+      entry.file.trim()
+    );
+    state.presetCache = {};
+    populatePresetSelectFromManifest();
+  } catch (_) {
+    state.presetManifest = [];
+    state.presetCache = {};
+    populatePresetControls();
+  }
+}
+
+function populatePresetSelectFromManifest() {
+  populatePresetControls();
+  if (!els.presetSelect) {
+    return;
+  }
+  for (const entry of state.presetManifest) {
+    const option = document.createElement("option");
+    option.value = entry.id;
+    option.textContent = entry.name || entry.id;
+    els.presetSelect.appendChild(option);
+  }
+  if (!state.presetManifest.length) {
+    const empty = document.createElement("option");
+    empty.value = "";
+    empty.textContent = "No Shared Presets";
+    els.presetSelect.appendChild(empty);
+    els.presetSelect.value = "";
+    return;
+  }
+
+  const preferred =
+    state.presetManifest.find((entry) => entry.id === "factory-default") ||
+    state.presetManifest[0];
+  if (preferred) {
+    els.presetSelect.value = preferred.id;
+    applySelectedSharedPreset({ suppressStatus: true }).catch(() => {});
+  }
+}
+
+function onPresetSelectChanged() {
+  if (!els.presetSelect || !els.presetSelect.value) {
+    return;
+  }
+  applySelectedSharedPreset();
+}
+
+async function applySelectedSharedPreset(options = {}) {
+  if (!els.presetSelect) {
+    return;
+  }
+  const suppressStatus = Boolean(options && options.suppressStatus);
+  const presetId = els.presetSelect.value;
+  if (!presetId) {
+    if (!suppressStatus) {
+      setStatus("Select a shared preset to apply.");
+    }
+    return;
+  }
+  const entry = state.presetManifest.find((item) => item.id === presetId);
+  if (!entry) {
+    if (!suppressStatus) {
+      setStatus("Selected preset is not available in the manifest.");
+    }
+    return;
+  }
+  try {
+    const preset = await loadSharedPreset(entry);
+    applyPresetPayloadToUi(preset);
+    if (!suppressStatus) {
+      setStatus(`Applied preset: ${preset.name}`);
+    }
+  } catch (error) {
+    setStatus(`Preset load error: ${error.message}`);
+  }
+}
+
+async function loadSharedPreset(entry) {
+  const cacheKey = entry.id;
+  if (state.presetCache[cacheKey]) {
+    return state.presetCache[cacheKey];
+  }
+  const response = await fetch(entry.file, { cache: "no-store" });
+  if (!response.ok) {
+    throw new Error(`${entry.file} returned HTTP ${response.status}`);
+  }
+  const raw = await response.json();
+  const preset = normalizePresetPayload(raw, entry.name || entry.id);
+  state.presetCache[cacheKey] = preset;
+  return preset;
+}
+
+function normalizePresetPayload(raw, fallbackName) {
+  if (!raw || typeof raw !== "object") {
+    throw new Error("Preset file is not a valid JSON object.");
+  }
+  const settings = raw.settings && typeof raw.settings === "object"
+    ? raw.settings
+    : null;
+  if (!settings) {
+    throw new Error("Preset JSON must include a settings object.");
+  }
+  const schemaVersion = Number(raw.schemaVersion) || PRESET_SCHEMA_VERSION;
+  const name = typeof raw.name === "string" && raw.name.trim()
+    ? raw.name.trim()
+    : (fallbackName || "Preset");
+  return { schemaVersion, name, settings };
+}
+
+function exportCurrentPresetToFile() {
+  const providedName = window.prompt("Preset name", "My Preset");
+  if (providedName === null) {
+    return;
+  }
+  const presetName = providedName.trim() || "Untitled Preset";
+  const payload = {
+    schemaVersion: PRESET_SCHEMA_VERSION,
+    name: presetName,
+    description: "",
+    createdAt: new Date().toISOString(),
+    owner: {
+      type: "shared",
+      id: "public"
+    },
+    settings: capturePresetSettingsFromUi()
+  };
+  const fileName = `${slugifyPresetName(presetName)}.json`;
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const href = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = href;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(href);
+  setStatus(`Exported preset ${fileName}.`);
+}
+
+async function importPresetFromFile(event) {
+  const input = event.target;
+  const file = input && input.files && input.files[0];
+  if (!file) {
+    return;
+  }
+  try {
+    const text = await file.text();
+    const raw = JSON.parse(text);
+    const fallbackName = file.name.replace(/\.json$/i, "");
+    const preset = normalizePresetPayload(raw, fallbackName);
+    applyPresetPayloadToUi(preset);
+    setStatus(`Imported preset: ${preset.name}`);
+  } catch (error) {
+    setStatus(`Preset import error: ${error.message}`);
+  } finally {
+    input.value = "";
+  }
+}
+
+function capturePresetSettingsFromUi() {
+  const settings = {};
+  for (const spec of PRESET_CONTROL_SPECS) {
+    const control = els[spec.id];
+    if (!control) {
+      continue;
+    }
+    if (spec.type === "boolean") {
+      settings[spec.id] = Boolean(control.checked);
+      continue;
+    }
+    if (spec.type === "number") {
+      const value = Number(control.value);
+      settings[spec.id] = Number.isFinite(value) ? value : control.value;
+      continue;
+    }
+    settings[spec.id] = String(control.value);
+  }
+  settings.playMode = getSelectedPlaybackMode();
+  return settings;
+}
+
+function applyPresetPayloadToUi(preset) {
+  if (!preset || !preset.settings || typeof preset.settings !== "object") {
+    return;
+  }
+  const settings = preset.settings;
+  for (const spec of PRESET_CONTROL_SPECS) {
+    if (!(spec.id in settings)) {
+      continue;
+    }
+    const control = els[spec.id];
+    if (!control) {
+      continue;
+    }
+    const value = settings[spec.id];
+    if (spec.type === "boolean") {
+      control.checked = Boolean(value);
+      continue;
+    }
+    if (spec.type === "number") {
+      const numeric = Number(value);
+      if (Number.isFinite(numeric)) {
+        control.value = String(numeric);
+      }
+      continue;
+    }
+    const textValue = String(value);
+    if (control instanceof HTMLSelectElement) {
+      if (Array.from(control.options).some((opt) => opt.value === textValue)) {
+        control.value = textValue;
+      }
+    } else {
+      control.value = textValue;
+    }
+  }
+
+  const requestedPlayMode = typeof settings.playMode === "string" ? settings.playMode : "";
+  if (PRESET_PLAY_MODES.includes(requestedPlayMode)) {
+    const radio = els.playbackModeRadios.find((item) => item.value === requestedPlayMode);
+    if (radio) {
+      radio.checked = true;
+    }
+  }
+
+  syncScaleControlState();
+  syncPitchDetectorControlState();
+  syncSynthControlState();
+  syncControlLabels();
+  syncPlayModeAvailability();
+
+  if (state.analysis) {
+    rerunPitchAnalysis({ suppressStatus: true });
+  }
+  if (isPlaybackActive()) {
+    schedulePlaybackRefresh();
+  }
+}
+
+function slugifyPresetName(name) {
+  const normalized = String(name || "preset")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return normalized || "preset";
 }
 
 function resetAllControlsToDefaults() {

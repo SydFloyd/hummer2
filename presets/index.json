@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "description": "Shared preset manifest for Audio-to-MIDI Lab.",
+  "presets": [
+    {
+      "id": "factory-default",
+      "name": "Factory Default",
+      "file": "presets/factory-default.json",
+      "owner": {
+        "type": "shared",
+        "id": "public"
+      }
+    },
+    {
+      "id": "cello",
+      "name": "Cello",
+      "file": "presets/cello.json",
+      "owner": {
+        "type": "shared",
+        "id": "public"
+      }
+    }
+  ]
+}

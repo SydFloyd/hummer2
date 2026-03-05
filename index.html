@@ -56,6 +56,14 @@
         >&#x25b8;</button>
       </div>
 
+      <div class="preset-row">
+        <label class="preset-label" for="presetSelect">Presets</label>
+        <select id="presetSelect" aria-label="Shared presets"></select>
+        <button id="exportPresetBtn" type="button">Export</button>
+        <button id="importPresetBtn" type="button">Import</button>
+        <input id="presetFileInput" type="file" accept="application/json,.json" hidden>
+      </div>
+
       <div id="selectionPanel" class="selection-panel" hidden>
         <div class="control-grid">
           <label>
