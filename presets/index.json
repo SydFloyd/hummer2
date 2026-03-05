@@ -19,6 +19,15 @@
         "type": "shared",
         "id": "public"
       }
+    },
+    {
+      "id": "orange-leaf",
+      "name": "Orange Leaf",
+      "file": "presets/orange-leaf.json",
+      "owner": {
+        "type": "shared",
+        "id": "public"
+      }
     }
   ]
 }
