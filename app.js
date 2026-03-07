@@ -205,9 +205,6 @@ const els = {
   toggleSynthPanelBtn: document.getElementById("toggleSynthPanelBtn"),
   resetDefaultsBtn: document.getElementById("resetDefaultsBtn"),
   presetSelect: document.getElementById("presetSelect"),
-  exportPresetBtn: document.getElementById("exportPresetBtn"),
-  importPresetBtn: document.getElementById("importPresetBtn"),
-  presetFileInput: document.getElementById("presetFileInput"),
   synthTestBtn: document.getElementById("synthTestBtn"),
   selectionPanel: document.getElementById("selectionPanel"),
   synthSelectionPanel: document.getElementById("synthSelectionPanel"),
@@ -394,13 +391,6 @@ function wireEvents() {
   els.resetDefaultsBtn.addEventListener("click", resetAllControlsToDefaults);
   if (els.presetSelect) {
     els.presetSelect.addEventListener("change", onPresetSelectChanged);
-  }
-  if (els.exportPresetBtn) {
-    els.exportPresetBtn.addEventListener("click", exportCurrentPresetToFile);
-  }
-  if (els.importPresetBtn && els.presetFileInput) {
-    els.importPresetBtn.addEventListener("click", () => els.presetFileInput.click());
-    els.presetFileInput.addEventListener("change", importPresetFromFile);
   }
   els.synthTestBtn.addEventListener("pointerdown", handleSynthTestPointerDown);
   els.synthTestBtn.addEventListener("pointerup", handleSynthTestPointerUp);
@@ -841,78 +831,6 @@ function normalizePresetPayload(raw, fallbackName) {
   return { schemaVersion, name, settings };
 }
 
-function exportCurrentPresetToFile() {
-  const providedName = window.prompt("Preset name", "My Preset");
-  if (providedName === null) {
-    return;
-  }
-  const presetName = providedName.trim() || "Untitled Preset";
-  const payload = {
-    schemaVersion: PRESET_SCHEMA_VERSION,
-    name: presetName,
-    description: "",
-    createdAt: new Date().toISOString(),
-    owner: {
-      type: "shared",
-      id: "public"
-    },
-    settings: capturePresetSettingsFromUi()
-  };
-  const fileName = `${slugifyPresetName(presetName)}.json`;
-  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
-  const href = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = href;
-  link.download = fileName;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(href);
-  setStatus(`Exported preset ${fileName}.`);
-}
-
-async function importPresetFromFile(event) {
-  const input = event.target;
-  const file = input && input.files && input.files[0];
-  if (!file) {
-    return;
-  }
-  try {
-    const text = await file.text();
-    const raw = JSON.parse(text);
-    const fallbackName = file.name.replace(/\.json$/i, "");
-    const preset = normalizePresetPayload(raw, fallbackName);
-    applyPresetPayloadToUi(preset);
-    setStatus(`Imported preset: ${preset.name}`);
-  } catch (error) {
-    setStatus(`Preset import error: ${error.message}`);
-  } finally {
-    input.value = "";
-  }
-}
-
-function capturePresetSettingsFromUi() {
-  const settings = {};
-  for (const spec of PRESET_CONTROL_SPECS) {
-    const control = els[spec.id];
-    if (!control) {
-      continue;
-    }
-    if (spec.type === "boolean") {
-      settings[spec.id] = Boolean(control.checked);
-      continue;
-    }
-    if (spec.type === "number") {
-      const value = Number(control.value);
-      settings[spec.id] = Number.isFinite(value) ? value : control.value;
-      continue;
-    }
-    settings[spec.id] = String(control.value);
-  }
-  settings.playMode = getSelectedPlaybackMode();
-  return settings;
-}
-
 function applyPresetPayloadToUi(preset) {
   if (!preset || !preset.settings || typeof preset.settings !== "object") {
     return;
@@ -968,14 +886,6 @@ function applyPresetPayloadToUi(preset) {
   if (isPlaybackActive()) {
     schedulePlaybackRefresh();
   }
-}
-
-function slugifyPresetName(name) {
-  const normalized = String(name || "preset")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-  return normalized || "preset";
 }
 
 function resetAllControlsToDefaults() {

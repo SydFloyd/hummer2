@@ -74,12 +74,14 @@ p {
   align-items: center;
 }
 
-.preset-row {
-  margin-top: 0.75rem;
+.preset-inline {
   display: grid;
-  grid-template-columns: auto minmax(220px, 1fr) auto auto;
+  grid-template-columns: auto minmax(0, 1fr);
   gap: 0.55rem;
   align-items: center;
+  flex: 0 1 clamp(135px, 18.75%, 240px);
+  margin-left: auto;
+  min-width: 0;
 }
 
 .preset-label {
@@ -90,8 +92,9 @@ p {
   letter-spacing: 0.01em;
 }
 
-.preset-row select {
+.preset-inline select {
   min-width: 0;
+  width: 100%;
 }
 
 button,
@@ -157,10 +160,6 @@ button:disabled {
 
 .icon-toggle {
   font-size: 1.5rem;
-}
-
-#resetDefaultsBtn {
-  margin-left: auto;
 }
 
 .icon-loop {
@@ -257,7 +256,7 @@ button:disabled {
 
 .synth-row-dynamics {
   margin-top: 0.75rem;
-  grid-template-columns: minmax(220px, 1fr) minmax(140px, 220px) auto;
+  grid-template-columns: minmax(220px, 1fr) minmax(180px, 240px) minmax(140px, 220px) auto;
   justify-content: space-between;
   align-items: end;
 }
@@ -296,7 +295,7 @@ button:disabled {
 .control-grid {
   margin-top: 0.9rem;
   display: grid;
-  grid-template-columns: repeat(6, minmax(90px, 1fr));
+  grid-template-columns: repeat(5, minmax(90px, 1fr));
   gap: 0.75rem;
   align-items: start;
 }
@@ -330,8 +329,6 @@ button:disabled {
 
 .pitch-detector-grid {
   margin-top: 0.85rem;
-  padding-top: 0.85rem;
-  border-top: 1px solid rgba(108, 205, 182, 0.22);
   display: grid;
   grid-template-columns: repeat(4, minmax(150px, 1fr));
   gap: 0.75rem;
@@ -494,13 +491,8 @@ tbody td {
     gap: 0.75rem;
   }
 
-  .preset-row {
-    grid-template-columns: repeat(2, minmax(130px, 1fr));
-  }
-
-  .preset-label,
-  .preset-row select {
-    grid-column: 1 / -1;
+  .preset-inline {
+    flex: 1 1 100%;
   }
 
   .scale-control-row {
@@ -529,10 +521,11 @@ tbody td {
   }
 
   .synth-row-dynamics {
-    grid-template-columns: repeat(3, minmax(120px, 1fr));
+    grid-template-columns: repeat(2, minmax(140px, 1fr));
   }
 
   #synthTestBtn {
     width: 100%;
+    grid-column: 1 / -1;
   }
 }

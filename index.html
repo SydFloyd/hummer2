@@ -44,6 +44,10 @@
             Original
           </label>
         </div>
+        <div class="preset-inline">
+          <label class="preset-label" for="presetSelect">Presets</label>
+          <select id="presetSelect" aria-label="Shared presets"></select>
+        </div>
         <button id="resetDefaultsBtn" class="reset-btn" type="button" aria-label="Reset defaults" title="Reset defaults">Reset</button>
         <button
           id="toggleControlsBtn"
@@ -54,14 +58,6 @@
           aria-expanded="false"
           title="Expand settings"
         >&#x25b8;</button>
-      </div>
-
-      <div class="preset-row">
-        <label class="preset-label" for="presetSelect">Presets</label>
-        <select id="presetSelect" aria-label="Shared presets"></select>
-        <button id="exportPresetBtn" type="button">Export</button>
-        <button id="importPresetBtn" type="button">Import</button>
-        <input id="presetFileInput" type="file" accept="application/json,.json" hidden>
       </div>
 
       <div id="selectionPanel" class="selection-panel" hidden>
@@ -93,11 +89,6 @@
               <option value="median">Median</option>
               <option value="tailWeightedMean">Tail-Weighted Mean</option>
             </select>
-          </label>
-          <label>
-            Portamento Speed
-            <input id="bendSmoothing" type="range" min="0" max="100" step="1" value="35">
-            <span id="bendSmoothingValue">35%</span>
           </label>
         </div>
 
@@ -286,6 +277,11 @@
             <label class="inline playback-toggle synth-inline-end">
               <input id="continuousDynamics" type="checkbox" checked>
               Follow Original Amplitude
+            </label>
+            <label>
+              Portamento Speed
+              <input id="bendSmoothing" type="range" min="0" max="100" step="1" value="35">
+              <span id="bendSmoothingValue">35%</span>
             </label>
             <label>
               Output Gain
