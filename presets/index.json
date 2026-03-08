@@ -12,6 +12,15 @@
       }
     },
     {
+      "id": "glass-pipe",
+      "name": "Glass Pipe",
+      "file": "presets/glass-pipe.json",
+      "owner": {
+        "type": "shared",
+        "id": "public"
+      }
+    },
+    {
       "id": "tin-kite",
       "name": "Tin Kite",
       "file": "presets/tin-kite.json",

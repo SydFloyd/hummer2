@@ -1,0 +1,4 @@
+numpy>=2.4,<3
+torch>=2.10,<3
+torchaudio>=2.10,<3
+torchcrepe>=0.0.24,<0.1
