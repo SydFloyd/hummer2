@@ -24,8 +24,9 @@ const DEFAULT_RAW_GRAVITY_ENABLED = false;
 const APP_CONFIG = {
   controls: {
     gateMultiplier: { min: 1.2, max: 6, step: 0.1, defaultValue: 2.5 },
-    minNoteMs: { min: 20, max: 300, step: 5, defaultValue: 25 },
+    minNoteMs: { min: 10, max: 300, step: 5, defaultValue: 25 },
     pitchJumpSplit: { min: 0, max: 6, step: 0.1, defaultValue: 0.6 },
+    flutterToleranceMs: { min: 0, max: 180, step: 5, defaultValue: 100 },
     maxNoteJump: { min: 0, max: 24, step: 0.5, defaultValue: 18 },
     rawPortamentoAmount: { min: 0, max: 100, step: 1, defaultValue: 35 },
     rawGravityAmount: { min: 0, max: 100, step: 1, defaultValue: 100 },
@@ -122,8 +123,8 @@ const APP_CONFIG = {
       maxGain: 0.5,
       gainPower: 0.75,
       gapFillFrames: 2,
-      maxGravityPullSemitones: 0.8,
-      maxGravityStrength: 0.36
+      maxGravityPullSemitones: 1.75,
+      maxGravityStrength: 0.78
     },
     autoPlayback: {
       smoothingAmount: 0
@@ -142,6 +143,7 @@ const PRESET_CONTROL_SPECS = [
   { id: "gateMultiplier", type: "number" },
   { id: "minNoteMs", type: "number" },
   { id: "pitchJumpSplit", type: "number" },
+  { id: "flutterToleranceMs", type: "number" },
   { id: "maxNoteJump", type: "number" },
   { id: "noteDerivation", type: "string" },
   { id: "rawPortamentoEnabled", type: "boolean" },
@@ -225,6 +227,8 @@ const els = {
   minNoteMsValue: document.getElementById("minNoteMsValue"),
   pitchJumpSplit: document.getElementById("pitchJumpSplit"),
   pitchJumpSplitValue: document.getElementById("pitchJumpSplitValue"),
+  flutterToleranceMs: document.getElementById("flutterToleranceMs"),
+  flutterToleranceMsValue: document.getElementById("flutterToleranceMsValue"),
   maxNoteJump: document.getElementById("maxNoteJump"),
   maxNoteJumpValue: document.getElementById("maxNoteJumpValue"),
   rawPortamentoEnabled: document.getElementById("rawPortamentoEnabled"),
@@ -312,6 +316,7 @@ function applyControlConfig() {
   applyRangeConfig(els.gateMultiplier, APP_CONFIG.controls.gateMultiplier);
   applyRangeConfig(els.minNoteMs, APP_CONFIG.controls.minNoteMs);
   applyRangeConfig(els.pitchJumpSplit, APP_CONFIG.controls.pitchJumpSplit);
+  applyRangeConfig(els.flutterToleranceMs, APP_CONFIG.controls.flutterToleranceMs);
   applyRangeConfig(els.maxNoteJump, APP_CONFIG.controls.maxNoteJump);
   applyRangeConfig(els.rawPortamentoAmount, APP_CONFIG.controls.rawPortamentoAmount);
   applyRangeConfig(els.rawGravityAmount, APP_CONFIG.controls.rawGravityAmount);
@@ -416,6 +421,10 @@ function wireEvents() {
     syncControlLabels();
     rerunDerivationAndRefreshPlayback();
   });
+  els.flutterToleranceMs.addEventListener("input", () => {
+    syncControlLabels();
+    rerunDerivationAndRefreshPlayback();
+  });
   els.maxNoteJump.addEventListener("input", () => {
     syncControlLabels();
     rerunDerivationAndRefreshPlayback();
@@ -498,6 +507,7 @@ function syncControlLabels() {
   els.gateMultiplierValue.textContent = Number(els.gateMultiplier.value).toFixed(1);
   els.minNoteMsValue.textContent = String(Number(els.minNoteMs.value));
   els.pitchJumpSplitValue.textContent = Number(els.pitchJumpSplit.value).toFixed(1);
+  els.flutterToleranceMsValue.textContent = String(Math.round(Number(els.flutterToleranceMs.value)));
   const maxJump = Number(els.maxNoteJump.value);
   els.maxNoteJumpValue.textContent = maxJump <= 0 ? "off" : maxJump.toFixed(1);
   els.rawPortamentoAmountValue.textContent = `${Math.round(Number(els.rawPortamentoAmount.value))}%`;
@@ -928,6 +938,9 @@ function applyPresetPayloadToUi(preset) {
 
   if (!("rawPortamentoAmount" in settings) && Number.isFinite(legacyBendSmoothing)) {
     els.rawPortamentoAmount.value = String(legacyBendSmoothing);
+  }
+  if (!("flutterToleranceMs" in settings)) {
+    els.flutterToleranceMs.value = String(APP_CONFIG.controls.flutterToleranceMs.defaultValue);
   }
   if (!("rawGravityAmount" in settings) && Number.isFinite(legacyBendSmoothing)) {
     els.rawGravityAmount.value = String(legacyBendSmoothing);
@@ -1386,6 +1399,11 @@ function readNoteModelSettingsFromUi() {
       APP_CONFIG.controls.pitchJumpSplit,
       APP_CONFIG.controls.pitchJumpSplit.defaultValue
     ),
+    flutterToleranceMs: sanitizeNumericSetting(
+      els.flutterToleranceMs.value,
+      APP_CONFIG.controls.flutterToleranceMs,
+      APP_CONFIG.controls.flutterToleranceMs.defaultValue
+    ),
     maxNoteJumpSemitones: sanitizeNumericSetting(
       els.maxNoteJump.value,
       APP_CONFIG.controls.maxNoteJump,
@@ -1417,7 +1435,8 @@ function buildDerivedNoteModel(analysis, noteModelSettings, autotuneConfig) {
   const autoPlaybackTrack = buildAutotunedContinuousMidiTrack(
     analysis,
     { segmentation, resolvedScale },
-    rawPlaybackTrack
+    rawPlaybackTrack,
+    noteModelSettings
   );
   return {
     threshold,
@@ -1455,6 +1474,14 @@ function getTargetStabilityBias(noteModelSettings) {
     noteModelSettings ? noteModelSettings.targetStability : APP_CONFIG.controls.pitchJumpSplit.defaultValue,
     APP_CONFIG.controls.pitchJumpSplit
   );
+}
+
+function getFlutterToleranceMs(noteModelSettings) {
+  const numeric = noteModelSettings ? Number(noteModelSettings.flutterToleranceMs) : NaN;
+  if (Number.isFinite(numeric)) {
+    return Math.max(0, numeric);
+  }
+  return APP_CONFIG.controls.flutterToleranceMs.defaultValue;
 }
 
 function resolveAutotuneScale(analysis, threshold, autotuneConfig, rawNotes) {
@@ -1958,7 +1985,12 @@ function detectNoiseFloor(rmsFrames) {
 
 function buildCurrentNoteSegmentation(analysis, threshold, noteModelSettings) {
   const decoded = decodeTargetNoteStateSequence(analysis, threshold, noteModelSettings);
-  const noteRuns = smoothDecodedNoteRuns(decoded.runs, analysis, noteModelSettings);
+  const noteRuns = smoothDecodedNoteRuns(
+    decoded.runs,
+    analysis,
+    noteModelSettings,
+    decoded.boundaryEvidenceFrames
+  );
   return {
     strategy: "soft-evidence-target-note-sequence-decode",
     gateThreshold: threshold,
@@ -2173,9 +2205,10 @@ function buildDecodedStateRuns(stateTrack) {
   return runs;
 }
 
-function smoothDecodedNoteRuns(runs, analysis, noteModelSettings) {
+function smoothDecodedNoteRuns(runs, analysis, noteModelSettings, boundaryEvidenceFrames = []) {
   const working = runs.map((run) => ({ ...run }));
   const minGapMs = noteModelSettings.minNoteMs * 0.55;
+  const flutterToleranceMs = getFlutterToleranceMs(noteModelSettings);
   let changed = true;
   while (changed) {
     changed = false;
@@ -2197,6 +2230,21 @@ function smoothDecodedNoteRuns(runs, analysis, noteModelSettings) {
           break;
         }
         continue;
+      }
+      if (
+        shouldMergeFlutterExcursion(
+          working,
+          i,
+          analysis,
+          noteModelSettings,
+          boundaryEvidenceFrames,
+          flutterToleranceMs
+        )
+      ) {
+        working[i - 1].frameEnd = working[i + 1].frameEnd;
+        working.splice(i, 2);
+        changed = true;
+        break;
       }
       if (durationMs > noteModelSettings.minNoteMs) {
         continue;
@@ -2232,6 +2280,94 @@ function smoothDecodedNoteRuns(runs, analysis, noteModelSettings) {
     }
   }
   return working.filter((run) => Number.isFinite(run.stateMidi));
+}
+
+function shouldMergeFlutterExcursion(
+  working,
+  index,
+  analysis,
+  noteModelSettings,
+  boundaryEvidenceFrames,
+  flutterToleranceMs
+) {
+  if (flutterToleranceMs <= 0 || index <= 0 || index >= working.length - 1) {
+    return false;
+  }
+  const run = working[index];
+  const prev = working[index - 1];
+  const next = working[index + 1];
+  if (
+    !run
+    || !prev
+    || !next
+    || !Number.isFinite(run.stateMidi)
+    || !Number.isFinite(prev.stateMidi)
+    || !Number.isFinite(next.stateMidi)
+  ) {
+    return false;
+  }
+  const durationMs = getFrameRangeDurationMs(analysis, run.frameStart, run.frameEnd);
+  if (durationMs > flutterToleranceMs) {
+    return false;
+  }
+  const returnDistance = Math.abs(prev.stateMidi - next.stateMidi);
+  if (returnDistance > 1) {
+    return false;
+  }
+  const excursionSemitones = Math.max(
+    Math.abs(run.stateMidi - prev.stateMidi),
+    Math.abs(run.stateMidi - next.stateMidi)
+  );
+  if (excursionSemitones > 1.35) {
+    return false;
+  }
+  const leadInMs = getFrameRangeDurationMs(analysis, prev.frameStart, prev.frameEnd);
+  if (leadInMs < Math.max(noteModelSettings.minNoteMs * 0.85, flutterToleranceMs * 0.7)) {
+    return false;
+  }
+  const stableBefore = averageTrackWindow(
+    analysis.tracks ? analysis.tracks.stablePlateauFrames : null,
+    Math.max(prev.frameStart, run.frameStart - 3),
+    Math.max(prev.frameStart, run.frameStart - 1)
+  );
+  if (stableBefore < 0.48) {
+    return false;
+  }
+  const boundarySupport = Math.max(
+    getTrackFrameValue(boundaryEvidenceFrames, run.frameStart),
+    getTrackFrameValue(boundaryEvidenceFrames, Math.min(boundaryEvidenceFrames.length - 1, run.frameEnd + 1))
+  );
+  const onsetSupport = Math.max(
+    getTrackFrameValue(analysis.tracks ? analysis.tracks.onsetStrengthFrames : null, run.frameStart),
+    getTrackFrameValue(analysis.tracks ? analysis.tracks.onsetStrengthFrames : null, Math.min(analysis.frameTimes.length - 1, run.frameEnd + 1))
+  );
+  const supportStrength = Math.max(boundarySupport, onsetSupport * 0.92);
+  return supportStrength < 0.58;
+}
+
+function getTrackFrameValue(track, index) {
+  if (!Array.isArray(track) || !track.length || index < 0 || index >= track.length) {
+    return 0;
+  }
+  const value = Number(track[index]);
+  return Number.isFinite(value) ? value : 0;
+}
+
+function averageTrackWindow(track, startIndex, endIndex) {
+  if (!Array.isArray(track) || !track.length || endIndex < startIndex) {
+    return 0;
+  }
+  let total = 0;
+  let count = 0;
+  for (let i = Math.max(0, startIndex); i <= Math.min(track.length - 1, endIndex); i++) {
+    const value = Number(track[i]);
+    if (!Number.isFinite(value)) {
+      continue;
+    }
+    total += value;
+    count += 1;
+  }
+  return count ? total / count : 0;
 }
 
 function getFrameRangeDurationMs(analysis, frameStart, frameEnd) {
@@ -3048,7 +3184,7 @@ function buildContinuousPitchModeSegments(analysis, derived, mode, rawPlaybackSe
   return collectContinuousSegmentsFromTracks(analysis, playbackData.midiTrack, playbackData.gainTrack);
 }
 
-function buildAutotunedContinuousMidiTrack(analysis, derived, midiTrack) {
+function buildAutotunedContinuousMidiTrack(analysis, derived, midiTrack, noteModelSettings) {
   const scale = derived && derived.resolvedScale
     ? derived.resolvedScale
     : resolveScaleForPreview();
@@ -3066,11 +3202,21 @@ function buildAutotunedContinuousMidiTrack(analysis, derived, midiTrack) {
     : [];
   const output = new Array(midiTrack.length).fill(null);
   let activeTarget = null;
+  let pendingTarget = null;
+  let pendingStart = -1;
+  let pendingFrames = 0;
+  let pendingSupport = 0;
+  let pendingLeadStrength = 0;
 
   for (let i = 0; i < midiTrack.length; i++) {
     const currentMidi = midiTrack[i];
     if (!Number.isFinite(currentMidi)) {
       activeTarget = null;
+      pendingTarget = null;
+      pendingStart = -1;
+      pendingFrames = 0;
+      pendingSupport = 0;
+      pendingLeadStrength = 0;
       continue;
     }
     const candidateTarget = quantizeMidi(currentMidi, scale.keyRoot, scale.modeId);
@@ -3080,18 +3226,51 @@ function buildAutotunedContinuousMidiTrack(analysis, derived, midiTrack) {
       continue;
     }
     if (candidateTarget !== activeTarget) {
-      const switchEase = computeAutotuneTargetSwitchEase(
+      const switchSupport = computeAutotuneTargetSwitchEase(
         boundaryEvidenceFrames[i],
         stablePlateauFrames[i],
         onsetStrengthFrames[i],
         slopeFrames[i]
       );
-      const holdDistance = Math.abs(currentMidi - activeTarget);
-      const candidateDistance = Math.abs(currentMidi - candidateTarget);
-      const switchMargin = 0.16 + (1 - switchEase) * 0.56;
-      if (candidateDistance + switchMargin < holdDistance) {
-        activeTarget = candidateTarget;
+      const leadStrength = computeAutotuneTargetLeadStrength(currentMidi, activeTarget, candidateTarget);
+      if (pendingTarget !== candidateTarget) {
+        pendingTarget = candidateTarget;
+        pendingStart = i;
+        pendingFrames = 1;
+        pendingSupport = switchSupport;
+        pendingLeadStrength = leadStrength;
+      } else {
+        pendingFrames += 1;
+        pendingSupport = Math.max(pendingSupport, switchSupport);
+        pendingLeadStrength = Math.max(pendingLeadStrength, leadStrength);
       }
+      const requiredFrames = computeAutotuneSwitchConfirmationFrames(
+        analysis,
+        noteModelSettings,
+        pendingSupport,
+        pendingLeadStrength,
+        activeTarget,
+        candidateTarget
+      );
+      if (pendingFrames >= requiredFrames) {
+        activeTarget = candidateTarget;
+        for (let writeIndex = pendingStart; writeIndex <= i; writeIndex++) {
+          if (Number.isFinite(midiTrack[writeIndex])) {
+            output[writeIndex] = activeTarget;
+          }
+        }
+        pendingTarget = null;
+        pendingStart = -1;
+        pendingFrames = 0;
+        pendingSupport = 0;
+        pendingLeadStrength = 0;
+      }
+    } else {
+      pendingTarget = null;
+      pendingStart = -1;
+      pendingFrames = 0;
+      pendingSupport = 0;
+      pendingLeadStrength = 0;
     }
     output[i] = activeTarget;
   }
@@ -3162,6 +3341,38 @@ function computeAutotuneTargetSwitchEase(boundaryEvidence, stablePlateau, onsetS
     0,
     1
   );
+}
+
+function computeAutotuneTargetLeadStrength(currentMidi, activeTarget, candidateTarget) {
+  const holdDistance = Math.abs(currentMidi - activeTarget);
+  const candidateDistance = Math.abs(currentMidi - candidateTarget);
+  const distanceLead = clamp((holdDistance - candidateDistance) / 1.4, 0, 1);
+  const targetJump = Math.abs(candidateTarget - activeTarget);
+  const jumpWeight = clamp((targetJump - 0.8) / 1.8, 0, 1);
+  return clamp(distanceLead * 0.72 + jumpWeight * 0.28, 0, 1);
+}
+
+function computeAutotuneSwitchConfirmationFrames(
+  analysis,
+  noteModelSettings,
+  switchSupport,
+  leadStrength,
+  activeTarget,
+  candidateTarget
+) {
+  const flutterToleranceMs = getFlutterToleranceMs(noteModelSettings);
+  if (flutterToleranceMs <= 0) {
+    return 1;
+  }
+  const frameDurationMs = Math.max(1, (analysis.hopSize / analysis.sampleRate) * 1000);
+  const baseFrames = Math.max(1, Math.round(flutterToleranceMs / frameDurationMs));
+  const jumpStrength = clamp((Math.abs(candidateTarget - activeTarget) - 0.8) / 1.8, 0, 1);
+  const confirmationStrength = clamp(
+    switchSupport * 0.55 + leadStrength * 0.3 + jumpStrength * 0.15,
+    0,
+    1
+  );
+  return Math.max(1, Math.round(baseFrames * (1 - confirmationStrength * 0.9)));
 }
 
 function playSelectedScale(fromLoop = false) {

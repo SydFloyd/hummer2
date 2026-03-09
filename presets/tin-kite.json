@@ -11,6 +11,7 @@
     "gateMultiplier": 2.5,
     "minNoteMs": 25,
     "pitchJumpSplit": 0.6,
+    "flutterToleranceMs": 70,
     "maxNoteJump": 18,
     "noteDerivation": "mean",
     "bendSmoothing": 24,
