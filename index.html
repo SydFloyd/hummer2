@@ -16,7 +16,7 @@
       <img src="assets/hummer_logo.png" alt="Hummer logo" class="logo">
       <div>
         <h1>Audio-to-MIDI Lab</h1>
-        <p>Record a hum, inspect signal features, and audition derived notes.</p>
+        <p>Record a hum, inspect signal features, and audition derived pitch tracks.</p>
       </div>
     </header>
 
@@ -28,12 +28,8 @@
         <button id="playSelectedBtn" class="transport-symbol-btn" type="button" aria-label="Play selected mode" title="Play selected mode" disabled>&#x25b6;</button>
         <div class="play-mode-group" role="radiogroup" aria-label="Playback mode">
           <label class="play-mode-option">
-            <input type="radio" name="playMode" value="rawBend" checked>
-            Raw + Bend
-          </label>
-          <label class="play-mode-option">
-            <input type="radio" name="playMode" value="raw">
-            Raw Pitch
+            <input type="radio" name="playMode" value="raw" checked>
+            Raw
           </label>
           <label class="play-mode-option">
             <input type="radio" name="playMode" value="auto">
@@ -63,9 +59,9 @@
       <div id="selectionPanel" class="selection-panel" hidden>
         <div class="control-grid">
           <label>
-            Gate Multiplier
+            Voicing Strictness
             <input id="gateMultiplier" type="range" min="1.2" max="6" step="0.1" value="2.5">
-            <span id="gateMultiplierValue">2.5x</span>
+            <span id="gateMultiplierValue">2.5</span>
           </label>
           <label>
             Min Note Length (ms)
@@ -73,7 +69,7 @@
             <span id="minNoteMsValue">20</span>
           </label>
           <label>
-            Pitch Jump Split (st)
+            Target Stability
             <input id="pitchJumpSplit" type="range" min="0" max="6" step="0.1" value="1.2">
             <span id="pitchJumpSplitValue">1.2</span>
           </label>
@@ -92,7 +88,7 @@
           </label>
         </div>
 
-        <div class="pitch-detector-grid">
+        <div class="pitch-frontend-grid">
           <label>
             Pitch Front End
             <select id="pitchFrontendModel">
@@ -131,6 +127,27 @@
             <select id="scaleMode"></select>
           </label>
           <button id="playScaleBtn">Play Scale</button>
+        </div>
+
+        <div class="raw-playback-row">
+          <label class="inline playback-toggle raw-playback-toggle">
+            <input id="rawPortamentoEnabled" type="checkbox">
+            Raw Portamento
+          </label>
+          <label class="raw-playback-slider">
+            Raw Portamento Amount
+            <input id="rawPortamentoAmount" type="range" min="0" max="100" step="1" value="35">
+            <span id="rawPortamentoAmountValue">35%</span>
+          </label>
+          <label class="inline playback-toggle raw-playback-toggle">
+            <input id="rawGravityEnabled" type="checkbox">
+            Raw Scale Gravity
+          </label>
+          <label class="raw-playback-slider">
+            Raw Gravity Amount
+            <input id="rawGravityAmount" type="range" min="0" max="100" step="1" value="100">
+            <span id="rawGravityAmountValue">100%</span>
+          </label>
         </div>
       </div>
 
@@ -263,11 +280,6 @@
               Follow Original Amplitude
             </label>
             <label>
-              Portamento Speed
-              <input id="bendSmoothing" type="range" min="0" max="100" step="1" value="35">
-              <span id="bendSmoothingValue">35%</span>
-            </label>
-            <label>
               Output Gain
               <input id="synthOutputGain" type="range" min="10" max="100" step="1" value="55">
               <span id="synthOutputGainValue">55%</span>
@@ -288,8 +300,7 @@
       <div class="stats">
         <span>Duration: <strong id="durationValue">-</strong></span>
         <span>Noise Floor RMS: <strong id="noiseFloorValue">-</strong></span>
-        <span>Gate Threshold RMS: <strong id="thresholdValue">-</strong></span>
-        <span>Notes: <strong id="noteCountValue">0</strong></span>
+        <span>Gate Reference RMS: <strong id="thresholdValue">-</strong></span>
         <span>Scale: <strong id="scaleInfoValue">Auto</strong></span>
       </div>
     </section>
@@ -302,23 +313,6 @@
     <section class="panel viz-panel">
       <h2>Spectrogram + Pitch Track</h2>
       <canvas id="specCanvas" width="1200" height="340"></canvas>
-    </section>
-
-    <section class="panel table-panel">
-      <h2>Derived Notes</h2>
-      <table>
-        <thead>
-          <tr>
-            <th>#</th>
-            <th>Start (s)</th>
-            <th>End (s)</th>
-            <th>Dur (ms)</th>
-            <th>Raw Pitch</th>
-            <th>Autotuned</th>
-          </tr>
-        </thead>
-        <tbody id="notesBody"></tbody>
-      </table>
     </section>
 
     <footer class="app-footer">

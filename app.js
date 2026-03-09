@@ -19,13 +19,16 @@ const AUTO_DETECT_MODE_ID = "major";
 
 const PITCH_MAX_MIDI = 76; // E5
 const DEFAULT_CONTINUOUS_DYNAMICS = true;
+const DEFAULT_RAW_PORTAMENTO_ENABLED = false;
+const DEFAULT_RAW_GRAVITY_ENABLED = false;
 const APP_CONFIG = {
   controls: {
     gateMultiplier: { min: 1.2, max: 6, step: 0.1, defaultValue: 2.5 },
     minNoteMs: { min: 20, max: 300, step: 5, defaultValue: 25 },
     pitchJumpSplit: { min: 0, max: 6, step: 0.1, defaultValue: 0.6 },
     maxNoteJump: { min: 0, max: 24, step: 0.5, defaultValue: 18 },
-    bendSmoothing: { min: 0, max: 100, step: 1, defaultValue: 35 },
+    rawPortamentoAmount: { min: 0, max: 100, step: 1, defaultValue: 35 },
+    rawGravityAmount: { min: 0, max: 100, step: 1, defaultValue: 100 },
     periodicityFloor: { min: 0, max: 1, step: 0.01, defaultValue: 0.28 },
     onsetSensitivity: { min: 0, max: 1, step: 0.01, defaultValue: 0.55 },
     stabilitySensitivity: { min: 0, max: 1, step: 0.01, defaultValue: 0.58 },
@@ -93,10 +96,7 @@ const APP_CONFIG = {
     endHoldFrames: 1,
     pitchRecoverySearchRadius: 4,
     rawPitchReducer: "mean",
-    tailWeightedMeanPower: 2.2,
-    pitchJumpConfirmFrames: 2,
-    pitchJumpReferenceFrames: 6,
-    pitchJumpMinFramesBetweenSplits: 3
+    tailWeightedMeanPower: 2.2
   },
   autotune: {
     defaultRoot: 0,
@@ -117,14 +117,16 @@ const APP_CONFIG = {
       voice2Enabled: true,
       filterEnvelopeDepthOctaves: 1.1
     },
-    rawBend: {
+    rawPlayback: {
       releaseMs: 30,
       maxGain: 0.5,
       gainPower: 0.75,
       gapFillFrames: 2,
       maxGravityPullSemitones: 0.8,
-      scaleGravityBase: 0.08,
-      scaleGravityBoost: 0.28
+      maxGravityStrength: 0.36
+    },
+    autoPlayback: {
+      smoothingAmount: 0
     }
   },
   midiTimeline: {
@@ -142,7 +144,10 @@ const PRESET_CONTROL_SPECS = [
   { id: "pitchJumpSplit", type: "number" },
   { id: "maxNoteJump", type: "number" },
   { id: "noteDerivation", type: "string" },
-  { id: "bendSmoothing", type: "number" },
+  { id: "rawPortamentoEnabled", type: "boolean" },
+  { id: "rawPortamentoAmount", type: "number" },
+  { id: "rawGravityEnabled", type: "boolean" },
+  { id: "rawGravityAmount", type: "number" },
   { id: "pitchFrontendModel", type: "string" },
   { id: "periodicityFloor", type: "number" },
   { id: "onsetSensitivity", type: "number" },
@@ -170,7 +175,7 @@ const PRESET_CONTROL_SPECS = [
   { id: "synthOutputGain", type: "number" },
   { id: "continuousDynamics", type: "boolean" }
 ];
-const PRESET_PLAY_MODES = ["rawBend", "raw", "auto", "original"];
+const PRESET_PLAY_MODES = ["raw", "auto", "original"];
 
 const state = {
   mediaRecorder: null,
@@ -222,8 +227,12 @@ const els = {
   pitchJumpSplitValue: document.getElementById("pitchJumpSplitValue"),
   maxNoteJump: document.getElementById("maxNoteJump"),
   maxNoteJumpValue: document.getElementById("maxNoteJumpValue"),
-  bendSmoothing: document.getElementById("bendSmoothing"),
-  bendSmoothingValue: document.getElementById("bendSmoothingValue"),
+  rawPortamentoEnabled: document.getElementById("rawPortamentoEnabled"),
+  rawPortamentoAmount: document.getElementById("rawPortamentoAmount"),
+  rawPortamentoAmountValue: document.getElementById("rawPortamentoAmountValue"),
+  rawGravityEnabled: document.getElementById("rawGravityEnabled"),
+  rawGravityAmount: document.getElementById("rawGravityAmount"),
+  rawGravityAmountValue: document.getElementById("rawGravityAmountValue"),
   pitchFrontendModel: document.getElementById("pitchFrontendModel"),
   periodicityFloor: document.getElementById("periodicityFloor"),
   periodicityFloorValue: document.getElementById("periodicityFloorValue"),
@@ -272,12 +281,10 @@ const els = {
   durationValue: document.getElementById("durationValue"),
   noiseFloorValue: document.getElementById("noiseFloorValue"),
   thresholdValue: document.getElementById("thresholdValue"),
-  noteCountValue: document.getElementById("noteCountValue"),
   scaleInfoValue: document.getElementById("scaleInfoValue"),
   waveCanvas: document.getElementById("waveCanvas"),
   specCanvas: document.getElementById("specCanvas"),
-  midiCanvas: document.getElementById("midiCanvas"),
-  notesBody: document.getElementById("notesBody")
+  midiCanvas: document.getElementById("midiCanvas")
 };
 
 bootstrap();
@@ -294,6 +301,7 @@ function bootstrap() {
   syncControlsPanelState();
   syncSynthPanelState();
   syncSynthControlState();
+  syncRawPlaybackControlState();
   drawPlaceholder(els.waveCanvas, "Record audio to view waveform and RMS.");
   drawPlaceholder(els.specCanvas, "Stop recording to generate spectrogram and pitch track.");
   drawPlaceholder(els.midiCanvas, "Derived MIDI timeline appears after processing.");
@@ -305,7 +313,8 @@ function applyControlConfig() {
   applyRangeConfig(els.minNoteMs, APP_CONFIG.controls.minNoteMs);
   applyRangeConfig(els.pitchJumpSplit, APP_CONFIG.controls.pitchJumpSplit);
   applyRangeConfig(els.maxNoteJump, APP_CONFIG.controls.maxNoteJump);
-  applyRangeConfig(els.bendSmoothing, APP_CONFIG.controls.bendSmoothing);
+  applyRangeConfig(els.rawPortamentoAmount, APP_CONFIG.controls.rawPortamentoAmount);
+  applyRangeConfig(els.rawGravityAmount, APP_CONFIG.controls.rawGravityAmount);
   applyRangeConfig(els.periodicityFloor, APP_CONFIG.controls.periodicityFloor);
   applyRangeConfig(els.onsetSensitivity, APP_CONFIG.controls.onsetSensitivity);
   applyRangeConfig(els.stabilitySensitivity, APP_CONFIG.controls.stabilitySensitivity);
@@ -328,6 +337,8 @@ function applyControlConfig() {
   els.pitchFrontendModel.value = APP_CONFIG.analysis.pitchFrontend.defaultModel;
   els.pitchUseViterbi.checked = APP_CONFIG.analysis.pitchFrontend.defaultUseViterbi;
   els.continuousDynamics.checked = DEFAULT_CONTINUOUS_DYNAMICS;
+  els.rawPortamentoEnabled.checked = DEFAULT_RAW_PORTAMENTO_ENABLED;
+  els.rawGravityEnabled.checked = DEFAULT_RAW_GRAVITY_ENABLED;
   els.synthOscillator.value = APP_CONFIG.playback.synth.oscillator;
   els.synthFilterType.value = APP_CONFIG.playback.synth.filterType;
   els.synthVoice2Enabled.checked = APP_CONFIG.playback.synth.voice2Enabled;
@@ -409,8 +420,26 @@ function wireEvents() {
     syncControlLabels();
     rerunDerivationAndRefreshPlayback();
   });
-  els.bendSmoothing.addEventListener("input", () => {
+  els.rawPortamentoEnabled.addEventListener("change", () => {
+    syncRawPlaybackControlState();
     syncControlLabels();
+    renderMidiTimeline();
+    schedulePlaybackRefresh();
+  });
+  els.rawPortamentoAmount.addEventListener("input", () => {
+    syncControlLabels();
+    renderMidiTimeline();
+    schedulePlaybackRefresh();
+  });
+  els.rawGravityEnabled.addEventListener("change", () => {
+    syncRawPlaybackControlState();
+    syncControlLabels();
+    renderMidiTimeline();
+    schedulePlaybackRefresh();
+  });
+  els.rawGravityAmount.addEventListener("input", () => {
+    syncControlLabels();
+    renderMidiTimeline();
     schedulePlaybackRefresh();
   });
   els.pitchFrontendModel.addEventListener("change", () => {
@@ -466,12 +495,13 @@ function wireEvents() {
 }
 
 function syncControlLabels() {
-  els.gateMultiplierValue.textContent = `${Number(els.gateMultiplier.value).toFixed(1)}x`;
+  els.gateMultiplierValue.textContent = Number(els.gateMultiplier.value).toFixed(1);
   els.minNoteMsValue.textContent = String(Number(els.minNoteMs.value));
   els.pitchJumpSplitValue.textContent = Number(els.pitchJumpSplit.value).toFixed(1);
   const maxJump = Number(els.maxNoteJump.value);
   els.maxNoteJumpValue.textContent = maxJump <= 0 ? "off" : maxJump.toFixed(1);
-  els.bendSmoothingValue.textContent = `${Math.round(Number(els.bendSmoothing.value))}%`;
+  els.rawPortamentoAmountValue.textContent = `${Math.round(Number(els.rawPortamentoAmount.value))}%`;
+  els.rawGravityAmountValue.textContent = `${Math.round(Number(els.rawGravityAmount.value))}%`;
   els.periodicityFloorValue.textContent = Number(els.periodicityFloor.value).toFixed(2);
   els.onsetSensitivityValue.textContent = Number(els.onsetSensitivity.value).toFixed(2);
   els.stabilitySensitivityValue.textContent = Number(els.stabilitySensitivity.value).toFixed(2);
@@ -494,7 +524,10 @@ function syncControlLabels() {
 }
 
 function syncScaleControlState() {
-  els.scaleRoot.disabled = els.scaleMode.value === "auto";
+  const autoSelected = getSelectedPlaybackMode() === "auto" && canPlayMode("auto");
+  setControlEnabled(els.scaleMode, autoSelected);
+  setControlEnabled(els.playScaleBtn, autoSelected);
+  setControlEnabled(els.scaleRoot, autoSelected && els.scaleMode.value !== "auto");
 }
 
 function toggleControlsPanel() {
@@ -546,6 +579,17 @@ function syncSynthControlState() {
   setControlEnabled(els.ampReleaseMs, ampEnvelopeEnabled);
 }
 
+function syncRawPlaybackControlState() {
+  const rawSelected = getSelectedPlaybackMode() === "raw" && canPlayMode("raw");
+  const portamentoEnabled = rawSelected && Boolean(els.rawPortamentoEnabled.checked);
+  const gravityEnabled = rawSelected && Boolean(els.rawGravityEnabled.checked);
+
+  setControlEnabled(els.rawPortamentoEnabled, rawSelected);
+  setControlEnabled(els.rawGravityEnabled, rawSelected);
+  setControlEnabled(els.rawPortamentoAmount, portamentoEnabled);
+  setControlEnabled(els.rawGravityAmount, gravityEnabled);
+}
+
 function setControlEnabled(control, enabled) {
   control.disabled = !enabled;
   const label = control.closest("label");
@@ -568,7 +612,7 @@ function syncLoopToggleState() {
 
 function getSelectedPlaybackMode() {
   const active = els.playbackModeRadios.find((radio) => radio.checked);
-  return active ? active.value : "rawBend";
+  return active ? active.value : "raw";
 }
 
 function canPlayMode(mode) {
@@ -578,13 +622,10 @@ function canPlayMode(mode) {
   if (!state.analysis || !state.derived) {
     return false;
   }
-  if (mode === "rawBend") {
-    return hasBendPlayableData();
+  if (mode === "raw" || mode === "auto") {
+    return hasContinuousPitchPlayableData();
   }
-  if (mode === "raw") {
-    return state.derived.rawNotes.length > 0;
-  }
-  return state.derived.autoNotes.length > 0;
+  return false;
 }
 
 function syncPlayModeAvailability() {
@@ -608,6 +649,8 @@ function syncPlayModeAvailability() {
   const canPlay = canPlayMode(selected);
   const isRecording = Boolean(state.mediaRecorder && state.mediaRecorder.state === "recording");
   els.playSelectedBtn.disabled = isRecording || !canPlay;
+  syncScaleControlState();
+  syncRawPlaybackControlState();
 }
 
 function isPlaybackActive() {
@@ -851,6 +894,8 @@ function applyPresetPayloadToUi(preset) {
     return;
   }
   const settings = preset.settings;
+  const requestedPlayMode = typeof settings.playMode === "string" ? settings.playMode : "";
+  const legacyBendSmoothing = Number(settings.bendSmoothing);
   for (const spec of PRESET_CONTROL_SPECS) {
     if (!(spec.id in settings)) {
       continue;
@@ -881,9 +926,22 @@ function applyPresetPayloadToUi(preset) {
     }
   }
 
-  const requestedPlayMode = typeof settings.playMode === "string" ? settings.playMode : "";
-  if (PRESET_PLAY_MODES.includes(requestedPlayMode)) {
-    const radio = els.playbackModeRadios.find((item) => item.value === requestedPlayMode);
+  if (!("rawPortamentoAmount" in settings) && Number.isFinite(legacyBendSmoothing)) {
+    els.rawPortamentoAmount.value = String(legacyBendSmoothing);
+  }
+  if (!("rawGravityAmount" in settings) && Number.isFinite(legacyBendSmoothing)) {
+    els.rawGravityAmount.value = String(legacyBendSmoothing);
+  }
+  if (!("rawPortamentoEnabled" in settings) && Number.isFinite(legacyBendSmoothing)) {
+    els.rawPortamentoEnabled.checked = legacyBendSmoothing > 0;
+  }
+  if (!("rawGravityEnabled" in settings) && Number.isFinite(legacyBendSmoothing)) {
+    els.rawGravityEnabled.checked = requestedPlayMode === "rawBend" && legacyBendSmoothing > 0;
+  }
+
+  const normalizedPlayMode = requestedPlayMode === "rawBend" ? "raw" : requestedPlayMode;
+  if (PRESET_PLAY_MODES.includes(normalizedPlayMode)) {
+    const radio = els.playbackModeRadios.find((item) => item.value === normalizedPlayMode);
     if (radio) {
       radio.checked = true;
     }
@@ -917,6 +975,10 @@ async function resetAllControlsToDefaults() {
     keyRoot: APP_CONFIG.autotune.defaultRoot,
     modeId: APP_CONFIG.autotune.defaultModeId
   };
+  const rawModeRadio = els.playbackModeRadios.find((radio) => radio.value === "raw");
+  if (rawModeRadio) {
+    rawModeRadio.checked = true;
+  }
 
   syncScaleControlState();
   syncSynthControlState();
@@ -1224,7 +1286,6 @@ function rerunDerivation() {
 
   updateStats();
   updateScaleInfo(resolvedScale);
-  renderTable();
   renderWaveform();
   renderMidiTimeline();
   syncPlayModeAvailability();
@@ -1305,7 +1366,7 @@ function getPitchFrontendLabel(frontendSettings) {
 
 function readNoteModelSettingsFromUi() {
   return {
-    gateMultiplier: sanitizeNumericSetting(
+    voicingStrictness: sanitizeNumericSetting(
       els.gateMultiplier.value,
       APP_CONFIG.controls.gateMultiplier,
       APP_CONFIG.controls.gateMultiplier.defaultValue
@@ -1320,7 +1381,7 @@ function readNoteModelSettingsFromUi() {
       ["mean", "median", "tailWeightedMean"],
       APP_CONFIG.detection.rawPitchReducer
     ),
-    pitchJumpSplitSemitones: sanitizeNumericSetting(
+    targetStability: sanitizeNumericSetting(
       els.pitchJumpSplit.value,
       APP_CONFIG.controls.pitchJumpSplit,
       APP_CONFIG.controls.pitchJumpSplit.defaultValue
@@ -1342,23 +1403,58 @@ function readAutotuneConfigFromUi() {
   return { keyRoot, modeId };
 }
 
-function resolveFrameGateThreshold(analysis, gateMultiplier) {
-  return analysis.noiseFloor * gateMultiplier + APP_CONFIG.detection.gateOffset;
+function resolveFrameGateThreshold(analysis, voicingStrictness) {
+  return analysis.noiseFloor * voicingStrictness + APP_CONFIG.detection.gateOffset;
 }
 
 function buildDerivedNoteModel(analysis, noteModelSettings, autotuneConfig) {
-  const threshold = resolveFrameGateThreshold(analysis, noteModelSettings.gateMultiplier);
+  const threshold = resolveFrameGateThreshold(analysis, noteModelSettings.voicingStrictness);
   const segmentation = buildCurrentNoteSegmentation(analysis, threshold, noteModelSettings);
   const rawNotes = deriveNotesFromSegmentation(analysis, segmentation, noteModelSettings);
   const resolvedScale = resolveAutotuneScale(analysis, threshold, autotuneConfig, rawNotes);
   const autoNotes = deriveAutotunedNotes(rawNotes, resolvedScale.keyRoot, resolvedScale.modeId);
+  const rawPlaybackTrack = buildThresholdGatedContinuousMidiTrack(analysis, threshold);
+  const autoPlaybackTrack = buildAutotunedContinuousMidiTrack(
+    analysis,
+    { segmentation, resolvedScale },
+    rawPlaybackTrack
+  );
   return {
     threshold,
     segmentation,
     rawNotes,
     autoNotes,
-    resolvedScale
+    resolvedScale,
+    playbackTracks: {
+      raw: rawPlaybackTrack,
+      auto: autoPlaybackTrack
+    }
   };
+}
+
+function controlValueToUnitInterval(value, range) {
+  if (!range || range.max <= range.min) {
+    return 0;
+  }
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return controlValueToUnitInterval(range.defaultValue, range);
+  }
+  return clamp((numeric - range.min) / (range.max - range.min), 0, 1);
+}
+
+function getVoicingStrictness(noteModelSettings) {
+  return controlValueToUnitInterval(
+    noteModelSettings ? noteModelSettings.voicingStrictness : APP_CONFIG.controls.gateMultiplier.defaultValue,
+    APP_CONFIG.controls.gateMultiplier
+  );
+}
+
+function getTargetStabilityBias(noteModelSettings) {
+  return controlValueToUnitInterval(
+    noteModelSettings ? noteModelSettings.targetStability : APP_CONFIG.controls.pitchJumpSplit.defaultValue,
+    APP_CONFIG.controls.pitchJumpSplit
+  );
 }
 
 function resolveAutotuneScale(analysis, threshold, autotuneConfig, rawNotes) {
@@ -1864,7 +1960,7 @@ function buildCurrentNoteSegmentation(analysis, threshold, noteModelSettings) {
   const decoded = decodeTargetNoteStateSequence(analysis, threshold, noteModelSettings);
   const noteRuns = smoothDecodedNoteRuns(decoded.runs, analysis, noteModelSettings);
   return {
-    strategy: "target-note-sequence-decode",
+    strategy: "soft-evidence-target-note-sequence-decode",
     gateThreshold: threshold,
     boundaryEvidenceFrames: decoded.boundaryEvidenceFrames,
     voicedEvidenceFrames: decoded.voicedEvidenceFrames,
@@ -1891,7 +1987,7 @@ function decodeTargetNoteStateSequence(analysis, threshold, noteModelSettings) {
   const onsetStrengthFrames = analysis.tracks.onsetStrengthFrames;
   const f0SlopeFrames = analysis.tracks.f0SlopeFrames;
   const stablePlateauFrames = analysis.tracks.stablePlateauFrames;
-  const energySupportFrames = computeEnergySupportFrames(analysis.rmsFrames, threshold);
+  const energySupportFrames = computeEnergySupportFrames(analysis.rmsFrames, noteModelSettings);
   const voicedEvidenceFrames = computeVoicedEvidenceFrames(periodicityFrames, energySupportFrames);
   const boundaryEvidenceFrames = buildBoundaryEvidenceFrames(
     periodicityFrames,
@@ -1979,9 +2075,13 @@ function decodeTargetNoteStateSequence(analysis, threshold, noteModelSettings) {
   };
 }
 
-function computeEnergySupportFrames(rmsFrames, threshold) {
-  const highReference = Math.max(threshold * 1.8, percentile(rmsFrames, 0.95), threshold + 1e-6);
-  const lowReference = threshold * 0.55;
+function computeEnergySupportFrames(rmsFrames, noteModelSettings) {
+  const strictness = getVoicingStrictness(noteModelSettings);
+  const noiseReference = percentile(rmsFrames, 0.18);
+  const peakReference = Math.max(noiseReference + 1e-6, percentile(rmsFrames, 0.95));
+  const dynamicRange = Math.max(1e-6, peakReference - noiseReference);
+  const lowReference = noiseReference + dynamicRange * (0.04 + strictness * 0.16);
+  const highReference = noiseReference + dynamicRange * (0.42 + strictness * 0.38);
   return rmsFrames.map((value) => clamp((value - lowReference) / Math.max(1e-6, highReference - lowReference), 0, 1));
 }
 
@@ -1991,18 +2091,23 @@ function computeVoicedEvidenceFrames(periodicityFrames, energySupportFrames) {
 
 function buildBoundaryEvidenceFrames(periodicityFrames, onsetStrengthFrames, f0SlopeFrames, stablePlateauFrames, noteModelSettings) {
   const config = APP_CONFIG.analysis.segmentation;
-  const pitchEdgeScale = Math.max(0.5, noteModelSettings.pitchJumpSplitSemitones || 0.5);
+  const targetStability = getTargetStabilityBias(noteModelSettings);
+  const rearticulationEase = 1 - targetStability;
+  const onsetWeight = config.onsetWeight * (0.9 + rearticulationEase * 0.35);
+  const periodicityDipWeight = config.periodicityDipWeight * (0.75 + rearticulationEase * 0.75);
+  const slopeBreakWeight = config.slopeBreakWeight * (0.8 + rearticulationEase * 0.7);
+  const plateauLandingWeight = config.plateauLandingWeight * (0.9 + rearticulationEase * 0.5);
   const evidence = new Array(periodicityFrames.length).fill(config.boundaryEvidenceFloor);
   for (let i = 1; i < evidence.length; i++) {
     const periodicityDip = Math.max(0, periodicityFrames[i - 1] - periodicityFrames[i]);
     const plateauLanding = Math.max(0, stablePlateauFrames[i] - stablePlateauFrames[i - 1]);
-    const slopeCue = clamp(f0SlopeFrames[i] * (1 + 1.2 / pitchEdgeScale), 0, 1);
+    const slopeCue = clamp(f0SlopeFrames[i] * (0.9 + rearticulationEase * 1.2), 0, 1);
     evidence[i] = clamp(
       config.boundaryEvidenceFloor +
-        onsetStrengthFrames[i] * config.onsetWeight +
-        periodicityDip * config.periodicityDipWeight +
-        slopeCue * config.slopeBreakWeight +
-        plateauLanding * config.plateauLandingWeight,
+        onsetStrengthFrames[i] * onsetWeight +
+        periodicityDip * periodicityDipWeight +
+        slopeCue * slopeBreakWeight +
+        plateauLanding * plateauLandingWeight,
       0,
       1
     );
@@ -2027,15 +2132,21 @@ function computeSequenceTransitionCost(previousStateMidi, nextStateMidi, boundar
   if (previousStateMidi === nextStateMidi) {
     return -plateauStrength * config.stableHoldBonus;
   }
-  const changeResistance = 1 + (1 - boundaryEvidence) * config.boundaryEvidenceWeight + plateauStrength * 0.55;
+  const targetStability = getTargetStabilityBias(noteModelSettings);
+  const rearticulationEase = 1 - targetStability;
+  const changeResistance = 1
+    + (1 - boundaryEvidence) * (config.boundaryEvidenceWeight + targetStability * 0.6)
+    + plateauStrength * (0.35 + targetStability * 0.35);
   if (previousStateMidi === null || nextStateMidi === null) {
     return config.changeBasePenalty * (0.85 + changeResistance * 0.35);
   }
   const delta = Math.abs(nextStateMidi - previousStateMidi);
-  const splitReference = Math.max(0.35, noteModelSettings.pitchJumpSplitSemitones || 0.35);
-  const smallMovePenalty = delta < splitReference ? (splitReference - delta + 0.25) * 0.8 : 0;
+  const smallMoveReference = 0.18 + targetStability * 1.45;
+  const smallMovePenalty = delta < smallMoveReference
+    ? (smallMoveReference - delta) * (0.4 + targetStability * 1.1)
+    : 0;
   return config.changeBasePenalty * changeResistance
-    + delta * config.jumpPenaltyPerSemitone
+    + delta * config.jumpPenaltyPerSemitone * (0.75 + rearticulationEase * 0.35)
     + smallMovePenalty;
 }
 
@@ -2175,69 +2286,6 @@ function filterNotesByMaxJump(notes, maxJumpSemitones) {
   return filtered;
 }
 
-function detectPitchJumpBoundaries(analysis, frameStart, frameEnd, splitSemitones) {
-  const threshold = Number(splitSemitones) || 0;
-  if (threshold <= 0) {
-    return [];
-  }
-
-  const boundaries = [];
-  const referenceWindow = APP_CONFIG.detection.pitchJumpReferenceFrames;
-  const confirmFrames = APP_CONFIG.detection.pitchJumpConfirmFrames;
-  const minFramesBetweenSplits = APP_CONFIG.detection.pitchJumpMinFramesBetweenSplits;
-
-  let recent = [];
-  let exceedCount = 0;
-  let candidateStart = -1;
-  let lastBoundary = frameStart;
-
-  for (let i = frameStart; i <= frameEnd; i++) {
-    const midi = analysis.midiFrames[i];
-    if (!Number.isFinite(midi)) {
-      continue;
-    }
-
-    if (recent.length < Math.max(2, Math.floor(referenceWindow / 2))) {
-      recent.push(midi);
-      if (recent.length > referenceWindow) {
-        recent.shift();
-      }
-      exceedCount = 0;
-      candidateStart = -1;
-      continue;
-    }
-
-    const referenceMidi = mean(recent);
-    const deviation = Math.abs(midi - referenceMidi);
-    if (deviation >= threshold) {
-      if (candidateStart < 0) {
-        candidateStart = i;
-      }
-      exceedCount += 1;
-      if (exceedCount >= confirmFrames) {
-        const boundaryFrame = candidateStart;
-        if (boundaryFrame - lastBoundary >= minFramesBetweenSplits) {
-          boundaries.push(boundaryFrame);
-          lastBoundary = boundaryFrame;
-          recent = [midi];
-          exceedCount = 0;
-          candidateStart = -1;
-          continue;
-        }
-      }
-    } else {
-      exceedCount = 0;
-      candidateStart = -1;
-    }
-
-    recent.push(midi);
-    if (recent.length > referenceWindow) {
-      recent.shift();
-    }
-  }
-  return boundaries;
-}
-
 function buildNoteFromFrameRange(analysis, frameStart, frameEnd, minNoteMs, pitchReducer) {
   if (frameEnd < frameStart) {
     return null;
@@ -2353,14 +2401,6 @@ function renderWaveform() {
   ctx.fillStyle = "rgba(6, 18, 27, 0.95)";
   ctx.fillRect(0, 0, width, height);
 
-  const notes = getDisplayNotes();
-  for (const note of notes) {
-    const x0 = (note.start / state.analysis.duration) * width;
-    const x1 = (note.end / state.analysis.duration) * width;
-    ctx.fillStyle = "rgba(54, 190, 157, 0.16)";
-    ctx.fillRect(x0, 0, Math.max(1, x1 - x0), height);
-  }
-
   const samples = state.analysis.samples;
   const step = Math.max(1, Math.floor(samples.length / width));
   ctx.strokeStyle = "rgba(92, 195, 255, 0.95)";
@@ -2472,7 +2512,22 @@ function renderMidiTimeline() {
   ctx.fillStyle = "rgba(6, 18, 27, 0.95)";
   ctx.fillRect(0, 0, width, height);
 
-  const bounds = getMidiBounds(state.analysis, state.derived);
+  const rawPlaybackSettings = state.derived ? readRawPlaybackSettingsFromUi() : null;
+  const rawPlaybackData = state.derived && state.derived.playbackTracks
+    ? buildRawContinuousPlaybackData(state.analysis, state.derived, rawPlaybackSettings)
+    : null;
+  const autoPlaybackData = state.derived && state.derived.playbackTracks
+    ? buildSmoothedContinuousPlaybackData(
+      state.analysis,
+      state.derived.playbackTracks.auto,
+      APP_CONFIG.playback.autoPlayback.smoothingAmount
+    )
+    : null;
+  const bounds = getMidiBounds(
+    state.analysis,
+    rawPlaybackData ? rawPlaybackData.midiTrack : null,
+    autoPlaybackData ? autoPlaybackData.midiTrack : null
+  );
   const minMidi = bounds.min;
   const maxMidi = bounds.max;
   const totalRange = Math.max(1, maxMidi - minMidi);
@@ -2498,32 +2553,8 @@ function renderMidiTimeline() {
     }
   }
 
-  if (state.derived) {
-    drawNoteBars(ctx, state.derived.rawNotes, {
-      color: "rgba(92, 195, 255, 0.3)",
-      stroke: "rgba(92, 195, 255, 0.8)",
-      leftPad,
-      innerWidth,
-      minMidi,
-      totalRange,
-      height,
-      pitchAccessor: (note) => note.rawMidi
-    });
-
-    drawNoteBars(ctx, state.derived.autoNotes, {
-      color: "rgba(54, 190, 157, 0.36)",
-      stroke: "rgba(123, 255, 176, 0.95)",
-      leftPad,
-      innerWidth,
-      minMidi,
-      totalRange,
-      height,
-      pitchAccessor: (note) => note.midi
-    });
-  }
-
   const midiFrames = state.analysis.midiFrames;
-  ctx.fillStyle = "rgba(92, 195, 255, 0.9)";
+  ctx.fillStyle = "rgba(92, 195, 255, 0.45)";
   for (let i = 0; i < midiFrames.length; i++) {
     if (!Number.isFinite(midiFrames[i])) {
       continue;
@@ -2533,43 +2564,69 @@ function renderMidiTimeline() {
     ctx.fillRect(x - 1, y - 1, 2, 2);
   }
 
+  if (rawPlaybackData) {
+    drawMidiTrackPath(ctx, state.analysis, rawPlaybackData.midiTrack, {
+      stroke: "rgba(120, 212, 255, 0.92)",
+      lineWidth: 2,
+      leftPad,
+      innerWidth,
+      minMidi,
+      totalRange,
+      height
+    });
+  }
+  if (autoPlaybackData) {
+    drawMidiTrackPath(ctx, state.analysis, autoPlaybackData.midiTrack, {
+      stroke: "rgba(123, 255, 176, 0.96)",
+      lineWidth: 2.35,
+      leftPad,
+      innerWidth,
+      minMidi,
+      totalRange,
+      height
+    });
+  }
+
   ctx.fillStyle = "rgba(209, 242, 234, 0.95)";
   ctx.textAlign = "left";
   ctx.textBaseline = "top";
-  ctx.fillText("raw notes", leftPad + 10, 8);
+  ctx.fillText("raw playback track", leftPad + 10, 8);
   ctx.fillStyle = "rgba(139, 255, 194, 0.95)";
-  ctx.fillText("autotuned notes", leftPad + 84, 8);
+  ctx.fillText("autotuned playback track", leftPad + 128, 8);
   ctx.fillStyle = "rgba(120, 212, 255, 0.95)";
-  ctx.fillText("frame-level MIDI", leftPad + 206, 8);
+  ctx.fillText("frontend MIDI", leftPad + 310, 8);
 }
 
-function drawNoteBars(ctx, notes, options) {
+function drawMidiTrackPath(ctx, analysis, midiTrack, options) {
   const {
-    color,
     stroke,
+    lineWidth,
     leftPad,
     innerWidth,
     minMidi,
     totalRange,
-    height,
-    pitchAccessor
+    height
   } = options;
-
-  for (const note of notes) {
-    const x0 = leftPad + (note.start / state.analysis.duration) * innerWidth;
-    const x1 = leftPad + (note.end / state.analysis.duration) * innerWidth;
-    const midiValue = pitchAccessor(note);
+  ctx.strokeStyle = stroke;
+  ctx.lineWidth = lineWidth;
+  ctx.beginPath();
+  let hasStarted = false;
+  for (let i = 0; i < midiTrack.length; i++) {
+    const midiValue = midiTrack[i];
     if (!Number.isFinite(midiValue)) {
+      hasStarted = false;
       continue;
     }
+    const x = leftPad + (analysis.frameTimes[i] / analysis.duration) * innerWidth;
     const y = midiToY(midiValue, minMidi, totalRange, height);
-    const barHeight = Math.max(6, height / (totalRange + 2));
-    ctx.fillStyle = color;
-    ctx.strokeStyle = stroke;
-    ctx.lineWidth = 1;
-    ctx.fillRect(x0, y - barHeight * 0.5, Math.max(2, x1 - x0), barHeight);
-    ctx.strokeRect(x0, y - barHeight * 0.5, Math.max(2, x1 - x0), barHeight);
+    if (!hasStarted) {
+      ctx.moveTo(x, y);
+      hasStarted = true;
+    } else {
+      ctx.lineTo(x, y);
+    }
   }
+  ctx.stroke();
 }
 
 function midiToY(midi, minMidi, totalRange, height) {
@@ -2579,7 +2636,7 @@ function midiToY(midi, minMidi, totalRange, height) {
   return topPad + (1 - (midi - minMidi) / totalRange) * usable;
 }
 
-function getMidiBounds(analysis, derived) {
+function getMidiBounds(analysis, ...tracks) {
   let minMidi = Number.POSITIVE_INFINITY;
   let maxMidi = Number.NEGATIVE_INFINITY;
 
@@ -2591,16 +2648,14 @@ function getMidiBounds(analysis, derived) {
     if (midi > maxMidi) maxMidi = midi;
   }
 
-  if (derived) {
-    const allNotes = [...derived.rawNotes, ...derived.autoNotes];
-    for (const note of allNotes) {
-      if (Number.isFinite(note.rawMidi)) {
-        if (note.rawMidi < minMidi) minMidi = note.rawMidi;
-        if (note.rawMidi > maxMidi) maxMidi = note.rawMidi;
-      }
-      if (Number.isFinite(note.midi)) {
-        if (note.midi < minMidi) minMidi = note.midi;
-        if (note.midi > maxMidi) maxMidi = note.midi;
+  for (const track of tracks) {
+    if (!Array.isArray(track)) {
+      continue;
+    }
+    for (const midi of track) {
+      if (Number.isFinite(midi)) {
+        if (midi < minMidi) minMidi = midi;
+        if (midi > maxMidi) maxMidi = midi;
       }
     }
   }
@@ -2705,320 +2760,11 @@ function fftMagnitudes(input) {
   return mags;
 }
 
-function normalizePitchDetectorSettings(settings) {
-  const defaults = APP_CONFIG.analysis.pitchDetector;
-  const source = settings || {};
-  const selectedType = source.type;
-  const type = selectedType === "yin" || selectedType === "mpm" || selectedType === "autocorrelation"
-    ? selectedType
-    : defaults.defaultType;
-
-  return {
-    type,
-    downsampleFactor: Math.max(1, Math.floor(source.downsampleFactor || defaults.downsampleFactor || 1)),
-    autocorrelation: {
-      threshold: sanitizeNumericSetting(
-        source.autocorrelation ? source.autocorrelation.threshold : undefined,
-        APP_CONFIG.controls.autocorrThreshold,
-        defaults.autocorrelation.threshold
-      ),
-      harmonicBias: sanitizeNumericSetting(
-        source.autocorrelation ? source.autocorrelation.harmonicBias : undefined,
-        APP_CONFIG.controls.autocorrHarmonicBias,
-        defaults.autocorrelation.harmonicBias
-      )
-    },
-    yin: {
-      threshold: sanitizeNumericSetting(
-        source.yin ? source.yin.threshold : undefined,
-        APP_CONFIG.controls.yinThreshold,
-        defaults.yin.threshold
-      ),
-      minClarity: sanitizeNumericSetting(
-        source.yin ? source.yin.minClarity : undefined,
-        APP_CONFIG.controls.yinClarity,
-        defaults.yin.minClarity
-      )
-    },
-    mpm: {
-      threshold: sanitizeNumericSetting(
-        source.mpm ? source.mpm.threshold : undefined,
-        APP_CONFIG.controls.mpmThreshold,
-        defaults.mpm.threshold
-      ),
-      minClarity: sanitizeNumericSetting(
-        source.mpm ? source.mpm.minClarity : undefined,
-        APP_CONFIG.controls.mpmClarity,
-        defaults.mpm.minClarity
-      )
-    }
-  };
-}
-
-function estimatePitch(frame, sampleRate, pitchDetectorSettings) {
-  const centered = preparePitchFrame(frame);
-  if (!centered) {
-    return 0;
-  }
-
-  const config = pitchDetectorSettings && pitchDetectorSettings.type
-    ? pitchDetectorSettings
-    : normalizePitchDetectorSettings(pitchDetectorSettings);
-  const downsampled = downsamplePitchSignal(
-    centered,
-    sampleRate,
-    config.downsampleFactor
-  );
-  const lagBounds = getPitchLagBounds(downsampled.sampleRate, downsampled.signal.length);
-  if (!lagBounds) {
-    return 0;
-  }
-  let lagEstimate = 0;
-
-  if (config.type === "yin") {
-    lagEstimate = estimatePitchLagYin(downsampled.signal, lagBounds.minLag, lagBounds.maxLag, config.yin);
-  } else if (config.type === "mpm") {
-    lagEstimate = estimatePitchLagMpm(downsampled.signal, lagBounds.minLag, lagBounds.maxLag, config.mpm);
-  } else {
-    lagEstimate = estimatePitchLagAutocorrelation(
-      downsampled.signal,
-      lagBounds.minLag,
-      lagBounds.maxLag,
-      config.autocorrelation
-    );
-  }
-
-  if (!(lagEstimate > 0)) {
-    return 0;
-  }
-
-  const pitchHz = downsampled.sampleRate / lagEstimate;
-  if (pitchHz < APP_CONFIG.pitch.minHz || pitchHz > APP_CONFIG.pitch.maxHz) {
-    return 0;
-  }
-  return pitchHz;
-}
-
-function preparePitchFrame(frame) {
-  const n = frame.length;
-  let meanValue = 0;
-  for (let i = 0; i < n; i++) {
-    meanValue += frame[i];
-  }
-  meanValue /= n;
-
-  const centered = new Float32Array(n);
-  let energy = 0;
-  for (let i = 0; i < n; i++) {
-    const value = frame[i] - meanValue;
-    centered[i] = value;
-    energy += value * value;
-  }
-
-  if (energy / n < APP_CONFIG.analysis.minFrameEnergy) {
-    return null;
-  }
-  return centered;
-}
-
-function getPitchLagBounds(sampleRate, frameLength) {
-  const minLag = Math.max(2, Math.floor(sampleRate / APP_CONFIG.pitch.maxHz));
-  const maxLag = Math.min(frameLength - 2, Math.floor(sampleRate / APP_CONFIG.pitch.minHz));
-  if (maxLag <= minLag) {
-    return null;
-  }
-  return { minLag, maxLag };
-}
-
-function downsamplePitchSignal(signal, sampleRate, downsampleFactor) {
-  const factor = Math.max(1, Math.floor(downsampleFactor || 1));
-  if (factor <= 1 || signal.length < factor * 8) {
-    return { signal, sampleRate };
-  }
-
-  const downsampledLength = Math.floor(signal.length / factor);
-  if (downsampledLength < 32) {
-    return { signal, sampleRate };
-  }
-
-  const downsampled = new Float32Array(downsampledLength);
-  for (let i = 0; i < downsampledLength; i++) {
-    const base = i * factor;
-    let sum = 0;
-    for (let j = 0; j < factor; j++) {
-      sum += signal[base + j];
-    }
-    downsampled[i] = sum / factor;
-  }
-
-  return {
-    signal: downsampled,
-    sampleRate: sampleRate / factor
-  };
-}
-
-function estimatePitchLagAutocorrelation(signal, minLag, maxLag, settings) {
-  let bestLag = -1;
-  let bestScore = Number.NEGATIVE_INFINITY;
-  let bestCorrelation = Number.NEGATIVE_INFINITY;
-  const correlations = new Float32Array(maxLag + 1);
-
-  for (let lag = minLag; lag <= maxLag; lag++) {
-    const correlation = normalizedAutocorrelation(signal, lag);
-    correlations[lag] = correlation;
-    const lagPosition = (lag - minLag) / Math.max(1, maxLag - minLag);
-    const score = correlation - settings.harmonicBias * lagPosition;
-    if (score > bestScore) {
-      bestScore = score;
-      bestLag = lag;
-      bestCorrelation = correlation;
-    }
-  }
-
-  if (bestLag < 0 || bestCorrelation < settings.threshold) {
-    return 0;
-  }
-
-  const center = correlations[bestLag];
-  const left = bestLag > minLag ? correlations[bestLag - 1] : center;
-  const right = bestLag < maxLag ? correlations[bestLag + 1] : center;
-  return refineLagWithParabola(bestLag, left, center, right, minLag, maxLag);
-}
-
-function estimatePitchLagYin(signal, minLag, maxLag, settings) {
-  const difference = new Float32Array(maxLag + 1);
-  for (let lag = 1; lag <= maxLag; lag++) {
-    let sum = 0;
-    for (let i = 0; i < signal.length - lag; i++) {
-      const delta = signal[i] - signal[i + lag];
-      sum += delta * delta;
-    }
-    difference[lag] = sum;
-  }
-
-  const cmndf = new Float32Array(maxLag + 1);
-  cmndf[0] = 1;
-  let runningSum = 0;
-  for (let lag = 1; lag <= maxLag; lag++) {
-    runningSum += difference[lag];
-    cmndf[lag] = runningSum > 0 ? (difference[lag] * lag) / runningSum : 1;
-  }
-
-  let bestLag = -1;
-  let bestValue = 1;
-  for (let lag = minLag; lag <= maxLag; lag++) {
-    const value = cmndf[lag];
-    if (value < bestValue) {
-      bestValue = value;
-      bestLag = lag;
-    }
-    if (value < settings.threshold) {
-      let localLag = lag;
-      let localValue = value;
-      while (localLag + 1 <= maxLag && cmndf[localLag + 1] <= localValue) {
-        localLag += 1;
-        localValue = cmndf[localLag];
-      }
-      bestLag = localLag;
-      bestValue = localValue;
-      break;
-    }
-  }
-
-  if (bestLag < 0) {
-    return 0;
-  }
-
-  const clarity = 1 - bestValue;
-  if (clarity < settings.minClarity) {
-    return 0;
-  }
-
-  const center = cmndf[bestLag];
-  const left = bestLag > minLag ? cmndf[bestLag - 1] : center;
-  const right = bestLag < maxLag ? cmndf[bestLag + 1] : center;
-  return refineLagWithParabola(bestLag, left, center, right, minLag, maxLag);
-}
-
-function estimatePitchLagMpm(signal, minLag, maxLag, settings) {
-  const nsdf = new Float32Array(maxLag + 1);
-  for (let lag = 0; lag <= maxLag; lag++) {
-    let acf = 0;
-    let norm = 0;
-    for (let i = 0; i < signal.length - lag; i++) {
-      const a = signal[i];
-      const b = signal[i + lag];
-      acf += a * b;
-      norm += a * a + b * b;
-    }
-    nsdf[lag] = norm > 1e-12 ? (2 * acf) / norm : 0;
-  }
-
-  let bestLag = -1;
-  let bestPeak = Number.NEGATIVE_INFINITY;
-  for (let lag = Math.max(minLag + 1, 1); lag < maxLag; lag++) {
-    const value = nsdf[lag];
-    if (value < settings.threshold) {
-      continue;
-    }
-    if (value >= nsdf[lag - 1] && value > nsdf[lag + 1] && value > bestPeak) {
-      bestPeak = value;
-      bestLag = lag;
-    }
-  }
-
-  if (bestLag < 0) {
-    for (let lag = minLag; lag <= maxLag; lag++) {
-      const value = nsdf[lag];
-      if (value > bestPeak) {
-        bestPeak = value;
-        bestLag = lag;
-      }
-    }
-  }
-
-  if (bestLag < 0 || bestPeak < settings.minClarity) {
-    return 0;
-  }
-
-  const center = nsdf[bestLag];
-  const left = bestLag > minLag ? nsdf[bestLag - 1] : center;
-  const right = bestLag < maxLag ? nsdf[bestLag + 1] : center;
-  return refineLagWithParabola(bestLag, left, center, right, minLag, maxLag);
-}
-
-function refineLagWithParabola(centerLag, leftValue, centerValue, rightValue, minLag, maxLag) {
-  let refined = centerLag;
-  const denominator = leftValue - (2 * centerValue) + rightValue;
-  if (Math.abs(denominator) > 1e-7) {
-    const shift = 0.5 * (leftValue - rightValue) / denominator;
-    if (Math.abs(shift) < 1) {
-      refined += shift;
-    }
-  }
-  return clamp(refined, minLag, maxLag);
-}
-
-function normalizedAutocorrelation(signal, lag) {
-  let cross = 0;
-  let e1 = 0;
-  let e2 = 0;
-  for (let i = 0; i < signal.length - lag; i++) {
-    const x = signal[i];
-    const y = signal[i + lag];
-    cross += x * y;
-    e1 += x * x;
-    e2 += y * y;
-  }
-  return cross / (Math.sqrt(e1 * e2) + 1e-12);
-}
-
 function updateStats() {
   const duration = state.analysis.duration;
   els.durationValue.textContent = `${duration.toFixed(2)} s`;
   els.noiseFloorValue.textContent = state.analysis.noiseFloor.toFixed(4);
   els.thresholdValue.textContent = state.derived.threshold.toFixed(4);
-  els.noteCountValue.textContent = String(getDisplayNotes().length);
 }
 
 function updateScaleInfo(resolvedScale) {
@@ -3040,29 +2786,7 @@ function formatScaleName(keyRoot, modeId) {
   return `${NOTE_NAMES[keyRoot]} ${mode.label}`;
 }
 
-function renderTable() {
-  const notes = getDisplayNotes();
-  const rows = notes.map((note, index) => {
-    const rawName = `${note.rawMidi.toFixed(2)} (${midiToNoteName(note.rawMidi)})`;
-    const tunedText = Number.isFinite(note.midi) ? `${note.midi.toFixed(2)} (${midiToNoteName(note.midi)})` : "-";
-    return `<tr>
-      <td>${index + 1}</td>
-      <td>${note.start.toFixed(3)}</td>
-      <td>${note.end.toFixed(3)}</td>
-      <td>${Math.round((note.end - note.start) * 1000)}</td>
-      <td>${rawName}</td>
-      <td>${tunedText}</td>
-    </tr>`;
-  }).join("");
-
-  els.notesBody.innerHTML = rows || `<tr><td colspan="6">No notes detected with current gate/settings.</td></tr>`;
-}
-
-function getDisplayNotes() {
-  return state.derived ? state.derived.autoNotes : [];
-}
-
-function hasBendPlayableData() {
+function hasContinuousPitchPlayableData() {
   if (!state.analysis || !state.derived) {
     return false;
   }
@@ -3074,28 +2798,23 @@ function hasBendPlayableData() {
   return false;
 }
 
-function isContinuousDynamicsEnabled() {
-  return Boolean(els.continuousDynamics && els.continuousDynamics.checked);
-}
-
-function getBendSmoothingAmountFromUi() {
-  return clamp((Number(els.bendSmoothing.value) || 0) / 100, 0, 1);
-}
-
-function getPortamentoSpeedFromUi() {
-  return clamp((Number(els.bendSmoothing.value) || 0) / 100, 0, 1);
-}
-
-function portamentoSpeedToSeconds(speed) {
-  const normalized = clamp(speed, 0, 1);
-  const minSec = 0.004;
-  const maxSec = 0.38;
-  return minSec + (1 - normalized) * (maxSec - minSec);
-}
-
-function portamentoSpeedToSmoothing(speed) {
-  const normalized = clamp(speed, 0, 1);
-  return Math.pow(1 - normalized, 0.7);
+function readRawPlaybackSettingsFromUi() {
+  const portamentoAmount = sanitizeNumericSetting(
+    els.rawPortamentoAmount.value,
+    APP_CONFIG.controls.rawPortamentoAmount,
+    APP_CONFIG.controls.rawPortamentoAmount.defaultValue
+  ) / 100;
+  const gravityAmount = sanitizeNumericSetting(
+    els.rawGravityAmount.value,
+    APP_CONFIG.controls.rawGravityAmount,
+    APP_CONFIG.controls.rawGravityAmount.defaultValue
+  ) / 100;
+  return {
+    portamentoEnabled: Boolean(els.rawPortamentoEnabled.checked),
+    portamentoAmount: clamp(portamentoAmount, 0, 1),
+    gravityEnabled: Boolean(els.rawGravityEnabled.checked),
+    gravityAmount: clamp(gravityAmount, 0, 1)
+  };
 }
 
 function readPlaybackSynthSettingsFromUi() {
@@ -3230,15 +2949,11 @@ function playSelectedMode(fromLoop = false) {
     playOriginalSample(fromLoop);
     return;
   }
-  if (mode === "rawBend") {
-    playRawBend(fromLoop);
-    return;
-  }
   if (mode === "raw") {
-    playNotes("raw", fromLoop);
+    playContinuousPitchMode("raw", fromLoop);
     return;
   }
-  playNotes("auto", fromLoop);
+  playContinuousPitchMode("auto", fromLoop);
 }
 
 function schedulePlaybackCompletion(totalMs, replayAction) {
@@ -3252,74 +2967,31 @@ function schedulePlaybackCompletion(totalMs, replayAction) {
   }, totalMs + 110);
 }
 
-function playNotes(mode, fromLoop = false) {
+function playContinuousPitchMode(mode, fromLoop = false) {
   if (!state.derived || !state.analysis) {
     return;
   }
   const synthSettings = readPlaybackSynthSettingsFromUi();
-  const portamentoSpeed = getPortamentoSpeedFromUi();
-  const notes = mode === "raw" ? state.derived.rawNotes : state.derived.autoNotes;
-  if (!notes.length) {
-    setStatus("No notes available for playback.");
+  const rawPlaybackSettings = readRawPlaybackSettingsFromUi();
+  const segments = buildContinuousPitchModeSegments(state.analysis, state.derived, mode, rawPlaybackSettings);
+  const played = playContinuousSegments(segments, synthSettings, () => playContinuousPitchMode(mode, true));
+  if (!played) {
+    setStatus("No voiced frames available for continuous playback.");
     return;
   }
-  if (isContinuousDynamicsEnabled()) {
-    const smoothingAmount = portamentoSpeedToSmoothing(portamentoSpeed);
-    const segments = buildNoteDrivenContinuousSegments(
-      state.analysis,
-      notes,
-      mode,
-      smoothingAmount
-    );
-    const played = playContinuousSegments(segments, synthSettings, () => playNotes(mode, true));
-    if (!played) {
-      setStatus("No voiced frames available for continuous playback.");
-      return;
-    }
-    const modeLabel = mode === "raw" ? "raw vocal pitch" : "autotuned note sequence";
-    setStatus(
-      `Playing ${modeLabel} with original amplitude envelope (portamento ${Math.round(portamentoSpeed * 100)}%).`
-    );
-    return;
-  }
-
-  stopPlayback();
-  const ctx = createAudioContext();
-  state.playbackContext = ctx;
-  syncStopButtonState();
-  const master = createPlaybackChain(ctx);
-
-  const startAt = ctx.currentTime + 0.05;
-  let maxEnd = 0;
-  const portamentoSec = portamentoSpeedToSeconds(portamentoSpeed);
-  let previousFreqHz = null;
-  for (const note of notes) {
-    const start = startAt + note.start;
-    const end = startAt + note.end;
-    if (end > maxEnd) maxEnd = end;
-
-    const midiValue = mode === "raw" ? note.rawMidi : note.midi;
-    const freqHz = midiToHz(midiValue);
-    triggerSynthVoice(
-      ctx,
-      freqHz,
-      start,
-      end,
-      master,
-      mode,
-      synthSettings,
-      previousFreqHz,
-      portamentoSec
-    );
-    previousFreqHz = freqHz;
-  }
-
-  const totalMs = Math.max(150, (maxEnd - ctx.currentTime) * 1000);
-  schedulePlaybackCompletion(totalMs, () => playNotes(mode, true));
-
   if (!fromLoop) {
-    const modeLabel = mode === "raw" ? "raw vocal pitch" : "autotuned note sequence";
-    setStatus(`${modeLabel[0].toUpperCase()}${modeLabel.slice(1)} (portamento ${Math.round(portamentoSpeed * 100)}%).`);
+    if (mode === "raw") {
+      const gravityScale = rawPlaybackSettings.gravityEnabled ? getScaleForRawGravity() : null;
+      const portamentoLabel = rawPlaybackSettings.portamentoEnabled
+        ? `${Math.round(rawPlaybackSettings.portamentoAmount * 100)}%`
+        : "off";
+      const gravityLabel = rawPlaybackSettings.gravityEnabled && gravityScale
+        ? `${Math.round(rawPlaybackSettings.gravityAmount * 100)}% ${formatScaleName(gravityScale.keyRoot, gravityScale.modeId)}`
+        : "off";
+      setStatus(`Playing raw pitch (portamento ${portamentoLabel}, gravity ${gravityLabel}).`);
+    } else {
+      setStatus("Playing autotuned continuous pitch.");
+    }
   }
 }
 
@@ -3352,33 +3024,7 @@ function playOriginalSample(fromLoop = false) {
   }
 }
 
-function playRawBend(fromLoop = false) {
-  if (!state.analysis || !state.derived) {
-    return;
-  }
-  const synthSettings = readPlaybackSynthSettingsFromUi();
-  const smoothingAmount = getBendSmoothingAmountFromUi();
-  const scaleForGravity = getScaleForRawBendGravity();
-  const segments = buildRawBendSegments(state.analysis, state.derived.threshold, {
-    smoothingAmount,
-    scaleForGravity
-  });
-  if (!segments.length) {
-    setStatus("No bend-capable raw frames available.");
-    return;
-  }
-  const gravityLabel = scaleForGravity ? formatScaleName(scaleForGravity.keyRoot, scaleForGravity.modeId) : "off";
-  const played = playContinuousSegments(segments, synthSettings, () => playRawBend(true));
-  if (!played) {
-    setStatus("No bend-capable raw frames available.");
-    return;
-  }
-  if (!fromLoop) {
-    setStatus(`Playing raw pitch + bend (${Math.round(smoothingAmount * 100)}% smooth, gravity ${gravityLabel})...`);
-  }
-}
-
-function getScaleForRawBendGravity() {
+function getScaleForRawGravity() {
   if (state.derived && state.derived.resolvedScale) {
     return {
       keyRoot: state.derived.resolvedScale.keyRoot,
@@ -3386,6 +3032,136 @@ function getScaleForRawBendGravity() {
     };
   }
   return resolveScaleForPreview();
+}
+
+function buildContinuousPitchModeSegments(analysis, derived, mode, rawPlaybackSettings) {
+  const playbackData = mode === "raw"
+    ? buildRawContinuousPlaybackData(analysis, derived, rawPlaybackSettings)
+    : buildSmoothedContinuousPlaybackData(
+      analysis,
+      derived && derived.playbackTracks ? derived.playbackTracks.auto : null,
+      APP_CONFIG.playback.autoPlayback.smoothingAmount
+    );
+  if (!playbackData || !playbackData.midiTrack || !playbackData.midiTrack.length) {
+    return [];
+  }
+  return collectContinuousSegmentsFromTracks(analysis, playbackData.midiTrack, playbackData.gainTrack);
+}
+
+function buildAutotunedContinuousMidiTrack(analysis, derived, midiTrack) {
+  const scale = derived && derived.resolvedScale
+    ? derived.resolvedScale
+    : resolveScaleForPreview();
+  const boundaryEvidenceFrames = derived && derived.segmentation
+    ? derived.segmentation.boundaryEvidenceFrames
+    : [];
+  const stablePlateauFrames = analysis.tracks && analysis.tracks.stablePlateauFrames
+    ? analysis.tracks.stablePlateauFrames
+    : [];
+  const onsetStrengthFrames = analysis.tracks && analysis.tracks.onsetStrengthFrames
+    ? analysis.tracks.onsetStrengthFrames
+    : [];
+  const slopeFrames = analysis.tracks && analysis.tracks.f0SlopeFrames
+    ? analysis.tracks.f0SlopeFrames
+    : [];
+  const output = new Array(midiTrack.length).fill(null);
+  let activeTarget = null;
+
+  for (let i = 0; i < midiTrack.length; i++) {
+    const currentMidi = midiTrack[i];
+    if (!Number.isFinite(currentMidi)) {
+      activeTarget = null;
+      continue;
+    }
+    const candidateTarget = quantizeMidi(currentMidi, scale.keyRoot, scale.modeId);
+    if (!Number.isFinite(activeTarget)) {
+      activeTarget = candidateTarget;
+      output[i] = candidateTarget;
+      continue;
+    }
+    if (candidateTarget !== activeTarget) {
+      const switchEase = computeAutotuneTargetSwitchEase(
+        boundaryEvidenceFrames[i],
+        stablePlateauFrames[i],
+        onsetStrengthFrames[i],
+        slopeFrames[i]
+      );
+      const holdDistance = Math.abs(currentMidi - activeTarget);
+      const candidateDistance = Math.abs(currentMidi - candidateTarget);
+      const switchMargin = 0.16 + (1 - switchEase) * 0.56;
+      if (candidateDistance + switchMargin < holdDistance) {
+        activeTarget = candidateTarget;
+      }
+    }
+    output[i] = activeTarget;
+  }
+
+  return output;
+}
+
+function buildThresholdGatedContinuousMidiTrack(analysis, threshold) {
+  const frameCount = analysis.frameTimes.length;
+  const gateOpen = new Array(frameCount).fill(false);
+  const midiTrack = new Array(frameCount).fill(null);
+  for (let i = 0; i < frameCount; i++) {
+    gateOpen[i] = analysis.rmsFrames[i] >= threshold;
+    if (gateOpen[i] && Number.isFinite(analysis.midiFrames[i])) {
+      midiTrack[i] = clampPitchMidi(analysis.midiFrames[i]);
+    }
+  }
+  fillShortPitchGaps(midiTrack, gateOpen, APP_CONFIG.playback.rawPlayback.gapFillFrames);
+  return midiTrack;
+}
+
+function buildRawContinuousPlaybackData(analysis, derived, rawPlaybackSettings) {
+  const targetTrack = derived && derived.playbackTracks ? derived.playbackTracks.raw : null;
+  if (!Array.isArray(targetTrack) || !targetTrack.length) {
+    return null;
+  }
+  const portamentoAmount = rawPlaybackSettings && rawPlaybackSettings.portamentoEnabled
+    ? rawPlaybackSettings.portamentoAmount
+    : 0;
+  const gravityAmount = rawPlaybackSettings && rawPlaybackSettings.gravityEnabled
+    ? rawPlaybackSettings.gravityAmount
+    : 0;
+  const scaleForGravity = gravityAmount > 0 ? getScaleForRawGravity() : null;
+  const validMask = targetTrack.map((value) => Number.isFinite(value));
+  const midiTrack = smoothMidiTrackWithGravity(
+    targetTrack,
+    validMask,
+    portamentoAmount,
+    scaleForGravity,
+    gravityAmount
+  );
+  const voicedMask = midiTrack.map((value) => Number.isFinite(value));
+  const gainTrack = buildRmsDrivenGainTrack(analysis, voicedMask, portamentoAmount * 0.7);
+  return { midiTrack, gainTrack };
+}
+
+function buildSmoothedContinuousPlaybackData(analysis, targetTrack, smoothingAmount) {
+  if (!Array.isArray(targetTrack) || !targetTrack.length) {
+    return null;
+  }
+  const validMask = targetTrack.map((value) => Number.isFinite(value));
+  const portamentoMidiTrack = applyPortamentoTrack(targetTrack, validMask, smoothingAmount);
+  const smoothedMidiTrack = smoothScalarTrackBidirectional(portamentoMidiTrack, validMask, smoothingAmount * 0.22);
+  const voicedMask = smoothedMidiTrack.map((value) => Number.isFinite(value));
+  const gainTrack = buildRmsDrivenGainTrack(analysis, voicedMask, smoothingAmount * 0.55);
+  return {
+    midiTrack: smoothedMidiTrack,
+    gainTrack
+  };
+}
+
+function computeAutotuneTargetSwitchEase(boundaryEvidence, stablePlateau, onsetStrength, slopeStrength) {
+  return clamp(
+    (Number(boundaryEvidence) || 0) * 0.45 +
+      (Number(onsetStrength) || 0) * 0.25 +
+      (Number(slopeStrength) || 0) * 0.15 +
+      (1 - (Number(stablePlateau) || 0)) * 0.15,
+    0,
+    1
+  );
 }
 
 function playSelectedScale(fromLoop = false) {
@@ -3717,39 +3493,6 @@ function triggerSynthVoice(
   }
 }
 
-function buildNoteDrivenContinuousSegments(analysis, notes, mode, smoothingAmount) {
-  const frameCount = analysis.frameTimes.length;
-  if (!frameCount || !notes.length) {
-    return [];
-  }
-
-  const midiTrack = buildNoteMappedMidiTrack(analysis, notes, mode, frameCount);
-  const validMask = midiTrack.map((value) => Number.isFinite(value));
-  const portamentoMidiTrack = applyPortamentoTrack(midiTrack, validMask, smoothingAmount);
-  const smoothedMidiTrack = smoothScalarTrackBidirectional(portamentoMidiTrack, validMask, smoothingAmount * 0.22);
-  const voicedMask = smoothedMidiTrack.map((value) => Number.isFinite(value));
-  const smoothedGainTrack = buildRmsDrivenGainTrack(analysis, voicedMask, smoothingAmount * 0.55);
-  return collectContinuousSegmentsFromTracks(analysis, smoothedMidiTrack, smoothedGainTrack);
-}
-
-function buildNoteMappedMidiTrack(analysis, notes, mode, frameCount) {
-  const midiTrack = new Array(frameCount).fill(null);
-  for (const note of notes) {
-    const midiValue = mode === "raw" ? note.rawMidi : note.midi;
-    if (!Number.isFinite(midiValue)) {
-      continue;
-    }
-    const startFrame = resolveNoteFrameStart(analysis, note, frameCount);
-    const endFrame = resolveNoteFrameEnd(analysis, note, frameCount);
-    const from = Math.min(startFrame, endFrame);
-    const to = Math.max(startFrame, endFrame);
-    for (let i = from; i <= to; i++) {
-      midiTrack[i] = clampPitchMidi(midiValue);
-    }
-  }
-  return midiTrack;
-}
-
 function applyPortamentoTrack(track, validMask, amount) {
   const strength = clamp(amount || 0, 0, 1);
   if (strength <= 0) {
@@ -3773,63 +3516,6 @@ function applyPortamentoTrack(track, validMask, amount) {
   }
 
   return output;
-}
-
-function resolveNoteFrameStart(analysis, note, frameCount) {
-  if (Number.isFinite(note.frameStart)) {
-    return clamp(Math.round(note.frameStart), 0, frameCount - 1);
-  }
-  return findNearestFrameIndex(analysis.frameTimes, note.start);
-}
-
-function resolveNoteFrameEnd(analysis, note, frameCount) {
-  if (Number.isFinite(note.frameEnd)) {
-    return clamp(Math.round(note.frameEnd), 0, frameCount - 1);
-  }
-  return findNearestFrameIndex(analysis.frameTimes, note.end);
-}
-
-function findNearestFrameIndex(frameTimes, targetTime) {
-  if (!frameTimes.length) {
-    return 0;
-  }
-  let bestIndex = 0;
-  let bestDistance = Math.abs(frameTimes[0] - targetTime);
-  for (let i = 1; i < frameTimes.length; i++) {
-    const distance = Math.abs(frameTimes[i] - targetTime);
-    if (distance < bestDistance) {
-      bestDistance = distance;
-      bestIndex = i;
-    }
-  }
-  return bestIndex;
-}
-
-function buildRawBendSegments(analysis, threshold, options) {
-  const frameCount = analysis.frameTimes.length;
-  const gateOpen = new Array(frameCount).fill(false);
-  const midiTrack = new Array(frameCount).fill(null);
-
-  for (let i = 0; i < frameCount; i++) {
-    gateOpen[i] = analysis.rmsFrames[i] >= threshold;
-    if (gateOpen[i] && Number.isFinite(analysis.midiFrames[i])) {
-      midiTrack[i] = clampPitchMidi(analysis.midiFrames[i]);
-    }
-  }
-  fillShortPitchGaps(midiTrack, gateOpen, APP_CONFIG.playback.rawBend.gapFillFrames);
-  const smoothedMidiTrack = smoothMidiTrackWithGravity(
-    midiTrack,
-    gateOpen,
-    options ? options.smoothingAmount : 0,
-    options ? options.scaleForGravity : null
-  );
-  const hasSmoothedMidi = smoothedMidiTrack.map((value) => Number.isFinite(value));
-  const smoothedGainTrack = buildRmsDrivenGainTrack(
-    analysis,
-    hasSmoothedMidi,
-    (options ? options.smoothingAmount : 0) * 0.7
-  );
-  return collectContinuousSegmentsFromTracks(analysis, smoothedMidiTrack, smoothedGainTrack);
 }
 
 function fillShortPitchGaps(midiTrack, gateOpen, maxGap) {
@@ -3866,15 +3552,14 @@ function fillShortPitchGaps(midiTrack, gateOpen, maxGap) {
   }
 }
 
-function smoothMidiTrackWithGravity(midiTrack, gateOpen, smoothingAmount, scaleForGravity) {
-  const smoothed = smoothScalarTrackBidirectional(midiTrack, gateOpen, smoothingAmount);
-  if (!scaleForGravity || smoothingAmount <= 0) {
+function smoothMidiTrackWithGravity(midiTrack, validMask, smoothingAmount, scaleForGravity, gravityAmount = 0) {
+  const smoothed = smoothScalarTrackBidirectional(midiTrack, validMask, smoothingAmount);
+  if (!scaleForGravity || gravityAmount <= 0) {
     return smoothed;
   }
 
-  const gravityStrength = APP_CONFIG.playback.rawBend.scaleGravityBase
-    + smoothingAmount * APP_CONFIG.playback.rawBend.scaleGravityBoost;
-  const maxPull = APP_CONFIG.playback.rawBend.maxGravityPullSemitones;
+  const gravityStrength = clamp(gravityAmount, 0, 1) * APP_CONFIG.playback.rawPlayback.maxGravityStrength;
+  const maxPull = APP_CONFIG.playback.rawPlayback.maxGravityPullSemitones;
   const output = new Array(smoothed.length).fill(null);
 
   for (let i = 0; i < smoothed.length; i++) {
@@ -3954,7 +3639,7 @@ function buildRmsDrivenGainTrack(analysis, voicedMask, smoothingAmount) {
       continue;
     }
     const normalized = clamp(analysis.rmsFrames[i] / rmsReference, 0, 1);
-    gainTrack[i] = Math.pow(normalized, APP_CONFIG.playback.rawBend.gainPower) * APP_CONFIG.playback.rawBend.maxGain;
+    gainTrack[i] = Math.pow(normalized, APP_CONFIG.playback.rawPlayback.gainPower) * APP_CONFIG.playback.rawPlayback.maxGain;
   }
   return smoothScalarTrackBidirectional(gainTrack, voicedMask, smoothingAmount);
 }
@@ -4010,7 +3695,7 @@ function triggerBendVoice(ctx, segment, startAt, destination, synthSettings) {
   const useAmpEnvelope = !settings.followOriginalAmplitude;
   const envelopeSettings = useAmpEnvelope ? settings.ampEnvelope : null;
   const envelopeRelease = envelopeSettings ? envelopeSettings.releaseSec : 0;
-  const releaseSec = Math.max(envelopeRelease, APP_CONFIG.playback.rawBend.releaseMs / 1000);
+  const releaseSec = Math.max(envelopeRelease, APP_CONFIG.playback.rawPlayback.releaseMs / 1000);
   const segmentDuration = Math.max(0.01, end - start);
   const filterEnvelope = settings.filterEnvelope || {
     attackSec: 0.01,

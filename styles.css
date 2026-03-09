@@ -256,7 +256,7 @@ button:disabled {
 
 .synth-row-dynamics {
   margin-top: 0.75rem;
-  grid-template-columns: minmax(220px, 1fr) minmax(180px, 240px) minmax(140px, 220px) auto;
+  grid-template-columns: minmax(220px, 1fr) minmax(140px, 220px) auto;
   justify-content: space-between;
   align-items: end;
 }
@@ -327,7 +327,26 @@ button:disabled {
   justify-self: end;
 }
 
-.pitch-detector-grid {
+.raw-playback-row {
+  margin-top: 0.85rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid rgba(108, 205, 182, 0.22);
+  display: grid;
+  grid-template-columns: auto minmax(190px, 1fr) auto minmax(190px, 1fr);
+  gap: 0.75rem;
+  align-items: end;
+}
+
+.raw-playback-toggle {
+  align-self: center;
+  white-space: nowrap;
+}
+
+.raw-playback-slider {
+  min-width: 0;
+}
+
+.pitch-frontend-grid {
   margin-top: 0.85rem;
   display: grid;
   grid-template-columns: repeat(4, minmax(150px, 1fr));
@@ -343,10 +362,6 @@ label {
   min-width: 0;
 }
 
-.pitch-detector-option[hidden] {
-  display: none !important;
-}
-
 label.inline {
   display: flex;
   align-items: flex-start;
@@ -358,12 +373,6 @@ label.inline {
 .playback-toggle {
   font-size: 0.84rem;
   white-space: nowrap;
-}
-
-.pitch-downsample-toggle {
-  font-size: 0.84rem;
-  white-space: nowrap;
-  align-self: start;
 }
 
 input[type="checkbox"] {
@@ -391,11 +400,6 @@ input[type="range"] {
   min-width: 0;
 }
 
-#pitchDetector {
-  width: 100%;
-  min-width: 0;
-}
-
 .status-panel {
   display: grid;
   gap: 0.6rem;
@@ -420,29 +424,6 @@ canvas {
   border: 1px solid rgba(108, 205, 182, 0.2);
   border-radius: 10px;
   background: linear-gradient(180deg, rgba(6, 18, 27, 0.92), rgba(4, 14, 15, 0.88));
-}
-
-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 0.88rem;
-}
-
-th,
-td {
-  text-align: left;
-  padding: 0.42rem 0.45rem;
-  border-bottom: 1px solid rgba(108, 205, 182, 0.2);
-}
-
-thead th {
-  color: #bbefe0;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-}
-
-tbody td {
-  color: var(--ink-muted);
 }
 
 .app-footer {
@@ -509,8 +490,12 @@ tbody td {
     grid-column: 1 / -1;
   }
 
-  .pitch-detector-grid {
+  .pitch-frontend-grid {
     grid-template-columns: repeat(2, minmax(140px, 1fr));
+  }
+
+  .raw-playback-row {
+    grid-template-columns: 1fr;
   }
 
   .synth-row-voice,
