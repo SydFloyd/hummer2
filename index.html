@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=20260310b">
 </head>
 <body>
   <main class="app-shell">
@@ -150,8 +150,8 @@
           </label>
           <label class="raw-playback-slider">
             Raw Gravity Amount
-            <input id="rawGravityAmount" type="range" min="0" max="100" step="1" value="100">
-            <span id="rawGravityAmountValue">100%</span>
+            <input id="rawGravityAmount" type="range" min="0" max="100" step="1" value="50">
+            <span id="rawGravityAmountValue">50%</span>
           </label>
         </div>
       </div>
@@ -310,21 +310,11 @@
       </div>
     </section>
 
-    <section class="panel viz-panel">
-      <h2>Waveform + RMS Envelope</h2>
-      <canvas id="waveCanvas" width="1200" height="156"></canvas>
-    </section>
-
-    <section class="panel viz-panel">
-      <h2>Spectrogram + Pitch Track</h2>
-      <canvas id="specCanvas" width="1200" height="340"></canvas>
-    </section>
-
     <footer class="app-footer">
       <span>Repository: <a class="repo-link" href="https://github.com/SydFloyd/hummer2" target="_blank" rel="noopener noreferrer">github.com/SydFloyd/hummer2</a></span>
     </footer>
   </main>
 
-  <script src="app.js"></script>
+  <script src="app.js?v=20260310b"></script>
 </body>
 </html>

@@ -81,6 +81,10 @@ class HummerRequestHandler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(ROOT_DIR), **kwargs)
 
+    def end_headers(self):
+        self.send_header("Cache-Control", "no-store")
+        super().end_headers()
+
     def do_GET(self):
         parsed = urlparse(self.path)
         if parsed.path == "/api/health":
@@ -162,7 +166,6 @@ class HummerRequestHandler(SimpleHTTPRequestHandler):
             self.send_response(status)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
-            self.send_header("Cache-Control", "no-store")
             self.end_headers()
             self.wfile.write(body)
         except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError):

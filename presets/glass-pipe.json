@@ -11,9 +11,13 @@
     "gateMultiplier": 2.5,
     "minNoteMs": 25,
     "pitchJumpSplit": 0.6,
+    "flutterToleranceMs": 70,
     "maxNoteJump": 18,
     "noteDerivation": "mean",
-    "bendSmoothing": 48,
+    "rawPortamentoEnabled": true,
+    "rawPortamentoAmount": 48,
+    "rawGravityEnabled": true,
+    "rawGravityAmount": 48,
     "pitchFrontendModel": "tiny",
     "periodicityFloor": 0.24,
     "onsetSensitivity": 0.42,
@@ -40,6 +44,6 @@
     "synthVoice2Mix": 18,
     "synthOutputGain": 82,
     "continuousDynamics": true,
-    "playMode": "rawBend"
+    "playMode": "raw"
   }
 }

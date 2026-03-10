@@ -29,7 +29,7 @@ const APP_CONFIG = {
     flutterToleranceMs: { min: 0, max: 180, step: 5, defaultValue: 100 },
     maxNoteJump: { min: 0, max: 24, step: 0.5, defaultValue: 18 },
     rawPortamentoAmount: { min: 0, max: 100, step: 1, defaultValue: 35 },
-    rawGravityAmount: { min: 0, max: 100, step: 1, defaultValue: 100 },
+    rawGravityAmount: { min: 0, max: 100, step: 1, defaultValue: 50 },
     periodicityFloor: { min: 0, max: 1, step: 0.01, defaultValue: 0.28 },
     onsetSensitivity: { min: 0, max: 1, step: 0.01, defaultValue: 0.55 },
     stabilitySensitivity: { min: 0, max: 1, step: 0.01, defaultValue: 0.58 },
@@ -59,9 +59,6 @@ const APP_CONFIG = {
   analysis: {
     pitchFrameSize: 2048,
     pitchHopSize: 256,
-    spectrogramFrameSize: 1024,
-    spectrogramHopSize: 256,
-    spectrogramMaxFreq: 4500,
     trimTailMs: 110,
     minFrameEnergy: 1e-7,
     pitchFrontend: {
@@ -286,8 +283,6 @@ const els = {
   noiseFloorValue: document.getElementById("noiseFloorValue"),
   thresholdValue: document.getElementById("thresholdValue"),
   scaleInfoValue: document.getElementById("scaleInfoValue"),
-  waveCanvas: document.getElementById("waveCanvas"),
-  specCanvas: document.getElementById("specCanvas"),
   midiCanvas: document.getElementById("midiCanvas")
 };
 
@@ -306,10 +301,8 @@ function bootstrap() {
   syncSynthPanelState();
   syncSynthControlState();
   syncRawPlaybackControlState();
-  drawPlaceholder(els.waveCanvas, "Record audio to view waveform and RMS.");
-  drawPlaceholder(els.specCanvas, "Stop recording to generate spectrogram and pitch track.");
-  drawPlaceholder(els.midiCanvas, "Derived MIDI timeline appears after processing.");
   initializeSharedPresetLibrary();
+  drawPlaceholder(getMidiCanvas(), "Derived MIDI timeline appears after processing.");
 }
 
 function applyControlConfig() {
@@ -1013,7 +1006,6 @@ async function resetAllControlsToDefaults() {
     }
     state.analysis = nextAnalysisResult.analysis;
     rerunDerivation();
-    renderSpectrogram();
     setStatus(`Defaults restored. Front end: ${getPitchFrontendLabel(nextAnalysisResult.frontendSettings)}.`);
   } catch (error) {
     reportPitchAnalysisError("Reset error", error);
@@ -1097,7 +1089,6 @@ async function handleRecordingStopped() {
     state.analysis = initialAnalysisResult.analysis;
 
     rerunDerivation();
-    renderVisuals();
     const activeScale = state.derived && state.derived.resolvedScale
       ? formatScaleName(state.derived.resolvedScale.keyRoot, state.derived.resolvedScale.modeId)
       : "n/a";
@@ -1299,7 +1290,6 @@ function rerunDerivation() {
 
   updateStats();
   updateScaleInfo(resolvedScale);
-  renderWaveform();
   renderMidiTimeline();
   syncPlayModeAvailability();
 }
@@ -1324,7 +1314,6 @@ async function rerunPitchAnalysis(options = {}) {
   }
   state.analysis = nextAnalysisResult.analysis;
   rerunDerivation();
-  renderSpectrogram();
   if (!suppressStatus) {
     setStatus(`Pitch front end updated: ${getPitchFrontendLabel(nextAnalysisResult.frontendSettings)}.`);
   }
@@ -1777,22 +1766,9 @@ function buildAnalysisFromFrontendTrack(samples, sampleRate, frontendTrack, fron
     midiFrames: featureTracks.midiFrames,
     tracks: featureTracks,
     noiseFloor,
-    spectrogram: canReuseSpectrogram(reuseAnalysis, samples, sampleRate)
-      ? reuseAnalysis.spectrogram
-      : computeSpectrogram(samples, sampleRate),
     pitchFrontend: featureTracks.pitchFrontend,
     frontendTrack
   };
-}
-
-function canReuseSpectrogram(reuseAnalysis, samples, sampleRate) {
-  return Boolean(
-    reuseAnalysis &&
-    reuseAnalysis.sampleRate === sampleRate &&
-    reuseAnalysis.samples &&
-    reuseAnalysis.samples.length === samples.length &&
-    reuseAnalysis.spectrogram
-  );
 }
 
 function normalizeFrontendFrameTimes(frameTimes, frameCount, hopSize, sampleRate, duration) {
@@ -2518,130 +2494,15 @@ function quantizeMidi(midiValue, keyRoot, modeId) {
   return clampPitchMidi(best);
 }
 
-function renderVisuals() {
-  renderWaveform();
-  renderSpectrogram();
-  renderMidiTimeline();
-}
-
-function renderWaveform() {
-  if (!state.analysis) {
-    drawPlaceholder(els.waveCanvas, "No waveform available.");
-    return;
-  }
-
-  const canvas = els.waveCanvas;
-  const ctx = canvas.getContext("2d");
-  const { width, height } = canvas;
-  ctx.clearRect(0, 0, width, height);
-  ctx.fillStyle = "rgba(6, 18, 27, 0.95)";
-  ctx.fillRect(0, 0, width, height);
-
-  const samples = state.analysis.samples;
-  const step = Math.max(1, Math.floor(samples.length / width));
-  ctx.strokeStyle = "rgba(92, 195, 255, 0.95)";
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  for (let x = 0; x < width; x++) {
-    const start = x * step;
-    const end = Math.min(samples.length, start + step);
-    let min = 1;
-    let max = -1;
-    for (let i = start; i < end; i++) {
-      const sample = samples[i];
-      if (sample < min) min = sample;
-      if (sample > max) max = sample;
-    }
-    const yMin = (1 - ((min + 1) * 0.5)) * height;
-    const yMax = (1 - ((max + 1) * 0.5)) * height;
-    ctx.moveTo(x, yMin);
-    ctx.lineTo(x, yMax);
-  }
-  ctx.stroke();
-
-  const maxRms = Math.max(...state.analysis.rmsFrames, state.derived ? state.derived.threshold * 1.3 : 0.02, 0.02);
-  ctx.strokeStyle = "rgba(123, 255, 176, 0.95)";
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  for (let i = 0; i < state.analysis.frameTimes.length; i++) {
-    const x = (state.analysis.frameTimes[i] / state.analysis.duration) * width;
-    const y = height - (state.analysis.rmsFrames[i] / maxRms) * (height * 0.96);
-    if (i === 0) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
-  }
-  ctx.stroke();
-
-  if (state.derived) {
-    const thresholdY = height - (state.derived.threshold / maxRms) * (height * 0.96);
-    ctx.strokeStyle = "rgba(92, 195, 255, 0.85)";
-    ctx.lineWidth = 1.5;
-    ctx.setLineDash([7, 5]);
-    ctx.beginPath();
-    ctx.moveTo(0, thresholdY);
-    ctx.lineTo(width, thresholdY);
-    ctx.stroke();
-    ctx.setLineDash([]);
-  }
-}
-
-function renderSpectrogram() {
-  if (!state.analysis) {
-    drawPlaceholder(els.specCanvas, "No spectrogram available.");
-    return;
-  }
-
-  const canvas = els.specCanvas;
-  const ctx = canvas.getContext("2d");
-  const { width, height } = canvas;
-  const spec = state.analysis.spectrogram;
-  const image = ctx.createImageData(width, height);
-
-  for (let x = 0; x < width; x++) {
-    const frameIndex = Math.floor((x / (width - 1)) * (spec.frames.length - 1));
-    const frame = spec.frames[frameIndex];
-    for (let y = 0; y < height; y++) {
-      const binIndex = Math.floor(((height - 1 - y) / (height - 1)) * (frame.length - 1));
-      const db = frame[binIndex];
-      const norm = clamp((db - spec.minDb) / (spec.maxDb - spec.minDb), 0, 1);
-      const color = colorMap(norm);
-      const idx = (y * width + x) * 4;
-      image.data[idx] = color[0];
-      image.data[idx + 1] = color[1];
-      image.data[idx + 2] = color[2];
-      image.data[idx + 3] = 255;
-    }
-  }
-  ctx.putImageData(image, 0, 0);
-
-  ctx.strokeStyle = "rgba(123, 255, 176, 0.96)";
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  let hasStarted = false;
-  for (let i = 0; i < state.analysis.frameTimes.length; i++) {
-    const f0 = state.analysis.f0Hz[i];
-    if (!f0) {
-      hasStarted = false;
-      continue;
-    }
-    const x = (state.analysis.frameTimes[i] / state.analysis.duration) * width;
-    const y = height - (Math.min(spec.maxFreq, f0) / spec.maxFreq) * height;
-    if (!hasStarted) {
-      ctx.moveTo(x, y);
-      hasStarted = true;
-    } else {
-      ctx.lineTo(x, y);
-    }
-  }
-  ctx.stroke();
-}
-
 function renderMidiTimeline() {
-  if (!state.analysis) {
-    drawPlaceholder(els.midiCanvas, "No MIDI data available.");
+  const canvas = getMidiCanvas();
+  if (!canvas) {
     return;
   }
-
-  const canvas = els.midiCanvas;
+  if (!state.analysis) {
+    drawPlaceholder(canvas, "No MIDI data available.");
+    return;
+  }
   const ctx = canvas.getContext("2d");
   const { width, height } = canvas;
   ctx.clearRect(0, 0, width, height);
@@ -2804,96 +2665,6 @@ function getMidiBounds(analysis, ...tracks) {
     min: clampPitchMidi(Math.floor(minMidi) - pad),
     max: clampPitchMidi(Math.ceil(maxMidi) + pad)
   };
-}
-
-function computeSpectrogram(samples, sampleRate) {
-  const frameSize = APP_CONFIG.analysis.spectrogramFrameSize;
-  const hopSize = APP_CONFIG.analysis.spectrogramHopSize;
-  const maxFreq = APP_CONFIG.analysis.spectrogramMaxFreq;
-  const maxBin = Math.min((frameSize >> 1) - 1, Math.floor((maxFreq * frameSize) / sampleRate));
-  const win = hannWindow(frameSize);
-  const frames = [];
-  let minDb = Number.POSITIVE_INFINITY;
-  let maxDb = Number.NEGATIVE_INFINITY;
-
-  for (let start = 0; start + frameSize < samples.length; start += hopSize) {
-    const frame = new Float32Array(frameSize);
-    for (let i = 0; i < frameSize; i++) {
-      frame[i] = samples[start + i] * win[i];
-    }
-    const mags = fftMagnitudes(frame);
-    const dbFrame = new Float32Array(maxBin + 1);
-    for (let b = 0; b <= maxBin; b++) {
-      const db = 20 * Math.log10(mags[b] + 1e-9);
-      dbFrame[b] = db;
-      if (db < minDb) minDb = db;
-      if (db > maxDb) maxDb = db;
-    }
-    frames.push(dbFrame);
-  }
-
-  if (!frames.length) {
-    frames.push(new Float32Array(maxBin + 1));
-    minDb = -100;
-    maxDb = -20;
-  }
-
-  return {
-    frames,
-    minDb: Number.isFinite(minDb) ? minDb : -100,
-    maxDb: Number.isFinite(maxDb) ? maxDb : -20,
-    maxFreq
-  };
-}
-
-function fftMagnitudes(input) {
-  const n = input.length;
-  const re = new Float64Array(n);
-  const im = new Float64Array(n);
-  for (let i = 0; i < n; i++) {
-    re[i] = input[i];
-  }
-
-  let j = 0;
-  for (let i = 0; i < n; i++) {
-    if (i < j) {
-      const tmpRe = re[i];
-      re[i] = re[j];
-      re[j] = tmpRe;
-    }
-    let m = n >> 1;
-    while (m >= 1 && j >= m) {
-      j -= m;
-      m >>= 1;
-    }
-    j += m;
-  }
-
-  for (let size = 2; size <= n; size <<= 1) {
-    const half = size >> 1;
-    const step = (Math.PI * 2) / size;
-    for (let i = 0; i < n; i += size) {
-      for (let k = 0; k < half; k++) {
-        const angle = -k * step;
-        const cos = Math.cos(angle);
-        const sin = Math.sin(angle);
-        const evenIndex = i + k;
-        const oddIndex = evenIndex + half;
-        const tr = re[oddIndex] * cos - im[oddIndex] * sin;
-        const ti = re[oddIndex] * sin + im[oddIndex] * cos;
-        re[oddIndex] = re[evenIndex] - tr;
-        im[oddIndex] = im[evenIndex] - ti;
-        re[evenIndex] += tr;
-        im[evenIndex] += ti;
-      }
-    }
-  }
-
-  const mags = new Float32Array(n >> 1);
-  for (let i = 0; i < mags.length; i++) {
-    mags[i] = Math.hypot(re[i], im[i]);
-  }
-  return mags;
 }
 
 function updateStats() {
@@ -4017,14 +3788,6 @@ function trimAudioBufferTail(audioBuffer, trimMs, audioContext) {
   return trimmed;
 }
 
-function hannWindow(size) {
-  const out = new Float32Array(size);
-  for (let i = 0; i < size; i++) {
-    out[i] = 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / (size - 1));
-  }
-  return out;
-}
-
 function computeRms(samples) {
   let sum = 0;
   for (let i = 0; i < samples.length; i++) {
@@ -4048,15 +3811,10 @@ function midiToNoteName(midi) {
   return `${NOTE_NAMES[pitch]}${octave}`;
 }
 
-function colorMap(t) {
-  const eased = Math.pow(t, 0.82);
-  const r = Math.round(8 + 95 * eased);
-  const g = Math.round(22 + 205 * eased);
-  const b = Math.round(40 + 185 * (1 - eased * 0.5));
-  return [r, g, b];
-}
-
 function drawPlaceholder(canvas, text) {
+  if (!canvas) {
+    return;
+  }
   const ctx = canvas.getContext("2d");
   ctx.fillStyle = "rgba(6, 18, 27, 0.95)";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -4065,6 +3823,13 @@ function drawPlaceholder(canvas, text) {
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.fillText(text, canvas.width / 2, canvas.height / 2);
+}
+
+function getMidiCanvas() {
+  if (!els.midiCanvas) {
+    els.midiCanvas = document.getElementById("midiCanvas");
+  }
+  return els.midiCanvas;
 }
 
 function setStatus(text) {

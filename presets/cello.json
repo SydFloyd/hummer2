@@ -14,7 +14,10 @@
     "flutterToleranceMs": 70,
     "maxNoteJump": 18,
     "noteDerivation": "mean",
-    "bendSmoothing": 100,
+    "rawPortamentoEnabled": true,
+    "rawPortamentoAmount": 100,
+    "rawGravityEnabled": true,
+    "rawGravityAmount": 100,
     "pitchFrontendModel": "tiny",
     "periodicityFloor": 0.28,
     "onsetSensitivity": 0.55,
@@ -41,6 +44,6 @@
     "synthVoice2Mix": 24,
     "synthOutputGain": 52,
     "continuousDynamics": true,
-    "playMode": "rawBend"
+    "playMode": "raw"
   }
 }
