@@ -16,9 +16,6 @@ const SCALE_MODES = [
 ];
 const SCALE_BY_ID = Object.fromEntries(SCALE_MODES.map((mode) => [mode.id, mode]));
 const AUTO_DETECT_MODE_ID = "major";
-const CREPE_BINS = 360;
-const CREPE_CENTS_BASE = 1997.3794084376191;
-const CREPE_CENTS_PER_BIN = 20;
 
 const PITCH_MAX_MIDI = 76; // E5
 const DEFAULT_CONTINUOUS_DYNAMICS = true;
@@ -33,7 +30,7 @@ const APP_CONFIG = {
     maxNoteJump: { min: 0, max: 24, step: 0.5, defaultValue: 18 },
     rawPortamentoAmount: { min: 0, max: 100, step: 1, defaultValue: 35 },
     rawGravityAmount: { min: 0, max: 100, step: 1, defaultValue: 50 },
-    periodicityFloor: { min: 0, max: 1, step: 0.01, defaultValue: 0.35 },
+    periodicityFloor: { min: 0, max: 1, step: 0.01, defaultValue: 0.28 },
     onsetSensitivity: { min: 0, max: 1, step: 0.01, defaultValue: 0.55 },
     stabilitySensitivity: { min: 0, max: 1, step: 0.01, defaultValue: 0.58 },
     synthFilterCutoff: { min: 250, max: 7000, step: 25, defaultValue: 3200 },
@@ -70,12 +67,6 @@ const APP_CONFIG = {
       defaultUseViterbi: true,
       fmin: 65,
       fmax: 1200,
-      browserModelId: "crepe-browser",
-      browserModelUrl: "https://cdn.jsdelivr.net/gh/ml5js/ml5-data-and-models@main/models/pitch-detection/crepe/model.json",
-      browserSampleRate: 16000,
-      browserFrameSize: 1024,
-      browserBatchSize: 48,
-      browserCentWindow: 4,
       pitchSmoothAmount: 0.14,
       gapFillFrames: 2
     },
@@ -199,8 +190,6 @@ const state = {
   pitchAnalysisRefreshTimer: null,
   pitchAnalysisRequestId: 0,
   pitchAnalysisAbortController: null,
-  crepeBrowserModel: null,
-  crepeBrowserModelUrl: "",
   synthTestVoice: null,
   synthTestReleaseTimer: null,
   loopPlayback: false,
@@ -312,7 +301,6 @@ function bootstrap() {
   syncSynthPanelState();
   syncSynthControlState();
   syncRawPlaybackControlState();
-  syncPitchFrontendControlState();
   initializeSharedPresetLibrary();
   drawPlaceholder(getMidiCanvas(), "Derived MIDI timeline appears after processing.");
 }
@@ -457,7 +445,6 @@ function wireEvents() {
     schedulePlaybackRefresh();
   });
   els.pitchFrontendModel.addEventListener("change", () => {
-    syncPitchFrontendControlState();
     syncControlLabels();
     rerunPitchAnalysisAndRefreshPlayback().catch((error) => reportPitchAnalysisError("Pitch analysis error", error));
   });
@@ -604,12 +591,6 @@ function syncRawPlaybackControlState() {
   setControlEnabled(els.rawGravityEnabled, rawSelected);
   setControlEnabled(els.rawPortamentoAmount, portamentoEnabled);
   setControlEnabled(els.rawGravityAmount, gravityEnabled);
-}
-
-function syncPitchFrontendControlState() {
-  const frontendModelId = els.pitchFrontendModel.value;
-  const supportsViterbi = frontendModelId === "tiny" || frontendModelId === "full";
-  setControlEnabled(els.pitchUseViterbi, supportsViterbi);
 }
 
 function setControlEnabled(control, enabled) {
@@ -974,7 +955,6 @@ function applyPresetPayloadToUi(preset) {
 
   syncScaleControlState();
   syncSynthControlState();
-  syncPitchFrontendControlState();
   syncControlLabels();
   syncPlayModeAvailability();
 
@@ -1008,7 +988,6 @@ async function resetAllControlsToDefaults() {
 
   syncScaleControlState();
   syncSynthControlState();
-  syncPitchFrontendControlState();
   syncControlLabels();
   syncPlayModeAvailability();
 
@@ -1345,12 +1324,8 @@ async function analyzeSamplesWithCurrentPitchSettings(samples, sampleRate, reuse
   const reusableFrontendTrack = reuseAnalysis && hasReusableFrontendTrack(reuseAnalysis, frontendSettings)
     ? reuseAnalysis.frontendTrack
     : null;
-  let frontendTrack = reusableFrontendTrack;
-  if (!frontendTrack) {
-    frontendTrack = frontendSettings.source === "crepe-browser"
-      ? await requestCrepeBrowserFrontendTrack(samples, sampleRate, frontendSettings)
-      : await requestTorchcrepeFrontendTrack(samples, sampleRate, frontendSettings);
-  }
+  const frontendTrack = reusableFrontendTrack
+    || await requestTorchcrepeFrontendTrack(samples, sampleRate, frontendSettings);
   return {
     frontendSettings,
     analysis: buildAnalysisFromFrontendTrack(samples, sampleRate, frontendTrack, frontendSettings, reuseAnalysis)
@@ -1359,18 +1334,8 @@ async function analyzeSamplesWithCurrentPitchSettings(samples, sampleRate, reuse
 
 function readPitchFrontendSettingsFromUi() {
   const defaults = APP_CONFIG.analysis.pitchFrontend;
-  const frontendModelId = sanitizeChoice(
-    els.pitchFrontendModel.value,
-    ["tiny", "full", defaults.browserModelId],
-    defaults.defaultModel
-  );
-  const source = frontendModelId === defaults.browserModelId ? "crepe-browser" : "torchcrepe";
   return {
-    source,
-    frontendModelId,
-    model: source === "crepe-browser"
-      ? "crepe"
-      : (frontendModelId === "full" ? "full" : "tiny"),
+    model: els.pitchFrontendModel.value === "full" ? "full" : "tiny",
     useViterbi: Boolean(els.pitchUseViterbi.checked),
     periodicityFloor: sanitizeNumericSetting(
       els.periodicityFloor.value,
@@ -1388,11 +1353,6 @@ function readPitchFrontendSettingsFromUi() {
       APP_CONFIG.controls.stabilitySensitivity.defaultValue
     ),
     apiPath: defaults.apiPath,
-    browserModelUrl: defaults.browserModelUrl,
-    browserSampleRate: defaults.browserSampleRate,
-    browserFrameSize: defaults.browserFrameSize,
-    browserBatchSize: defaults.browserBatchSize,
-    browserCentWindow: defaults.browserCentWindow,
     hopLength: APP_CONFIG.analysis.pitchHopSize,
     fmin: defaults.fmin,
     fmax: defaults.fmax
@@ -1402,9 +1362,6 @@ function readPitchFrontendSettingsFromUi() {
 function getPitchFrontendLabel(frontendSettings) {
   if (!frontendSettings) {
     return "TorchCREPE";
-  }
-  if (frontendSettings.source === "crepe-browser") {
-    return "CREPE Browser";
   }
   return frontendSettings.model === "full" ? "TorchCREPE Full" : "TorchCREPE Tiny";
 }
@@ -1699,40 +1656,11 @@ function hasReusableFrontendTrack(reuseAnalysis, frontendSettings) {
     return false;
   }
   const settings = reuseAnalysis.frontendTrack.settings;
-  if (settings.source !== frontendSettings.source) {
-    return false;
-  }
-  if (settings.hopLength !== frontendSettings.hopLength || settings.fmin !== frontendSettings.fmin || settings.fmax !== frontendSettings.fmax) {
-    return false;
-  }
-  if (frontendSettings.source === "crepe-browser") {
-    return settings.browserModelUrl === frontendSettings.browserModelUrl
-      && settings.browserSampleRate === frontendSettings.browserSampleRate;
-  }
   return settings.model === frontendSettings.model
-    && settings.useViterbi === frontendSettings.useViterbi;
-}
-
-function createFrontendAbortController() {
-  const abortController = new AbortController();
-  const previousController = state.pitchAnalysisAbortController;
-  state.pitchAnalysisAbortController = abortController;
-  if (previousController) {
-    previousController.abort();
-  }
-  return abortController;
-}
-
-function releaseFrontendAbortController(abortController) {
-  if (state.pitchAnalysisAbortController === abortController) {
-    state.pitchAnalysisAbortController = null;
-  }
-}
-
-function throwIfFrontendRequestAborted(signal) {
-  if (signal && signal.aborted) {
-    throw new DOMException("Pitch analysis aborted.", "AbortError");
-  }
+    && settings.useViterbi === frontendSettings.useViterbi
+    && settings.hopLength === frontendSettings.hopLength
+    && settings.fmin === frontendSettings.fmin
+    && settings.fmax === frontendSettings.fmax;
 }
 
 async function requestTorchcrepeFrontendTrack(samples, sampleRate, frontendSettings) {
@@ -1746,7 +1674,12 @@ async function requestTorchcrepeFrontendTrack(samples, sampleRate, frontendSetti
     pad: "1"
   });
   const body = samples.buffer.slice(samples.byteOffset, samples.byteOffset + samples.byteLength);
-  const abortController = createFrontendAbortController();
+  const abortController = new AbortController();
+  const previousController = state.pitchAnalysisAbortController;
+  state.pitchAnalysisAbortController = abortController;
+  if (previousController) {
+    previousController.abort();
+  }
 
   let response = null;
   let payload = null;
@@ -1773,7 +1706,9 @@ async function requestTorchcrepeFrontendTrack(samples, sampleRate, frontendSetti
     }
     throw new Error("TorchCREPE backend is unavailable. Run `python server.py` from the repo root.");
   } finally {
-    releaseFrontendAbortController(abortController);
+    if (state.pitchAnalysisAbortController === abortController) {
+      state.pitchAnalysisAbortController = null;
+    }
   }
   if (!response.ok) {
     const detail = payload && payload.detail ? ` ${payload.detail}` : "";
@@ -1788,7 +1723,6 @@ async function requestTorchcrepeFrontendTrack(samples, sampleRate, frontendSetti
     f0Hz: payload.f0Hz,
     periodicityFrames: payload.periodicityFrames,
     settings: {
-      source: "torchcrepe",
       model: frontendSettings.model,
       useViterbi: frontendSettings.useViterbi,
       hopLength: frontendSettings.hopLength,
@@ -1797,252 +1731,6 @@ async function requestTorchcrepeFrontendTrack(samples, sampleRate, frontendSetti
     },
     frontend: payload.frontend || null
   };
-}
-
-async function requestCrepeBrowserFrontendTrack(samples, sampleRate, frontendSettings) {
-  const abortController = createFrontendAbortController();
-  try {
-    const tfRuntime = resolveTensorflowRuntime();
-    throwIfFrontendRequestAborted(abortController.signal);
-    const model = await ensureCrepeBrowserModel(tfRuntime, frontendSettings);
-    throwIfFrontendRequestAborted(abortController.signal);
-
-    const resampled = resampleMonoFloat32(samples, sampleRate, frontendSettings.browserSampleRate);
-    const frameData = buildCrepeBrowserFrames(
-      resampled,
-      frontendSettings.browserFrameSize,
-      sampleRate,
-      frontendSettings.hopLength,
-      frontendSettings.browserSampleRate
-    );
-
-    const decoded = await inferCrepeBrowserPitchFrames(
-      tfRuntime,
-      model,
-      frameData,
-      frontendSettings,
-      abortController.signal
-    );
-
-    return {
-      frameTimes: frameData.frameTimes,
-      f0Hz: decoded.f0Hz,
-      periodicityFrames: decoded.periodicityFrames,
-      settings: {
-        source: "crepe-browser",
-        model: "crepe",
-        useViterbi: false,
-        hopLength: frontendSettings.hopLength,
-        fmin: frontendSettings.fmin,
-        fmax: frontendSettings.fmax,
-        browserModelUrl: frontendSettings.browserModelUrl,
-        browserSampleRate: frontendSettings.browserSampleRate
-      },
-      frontend: {
-        type: "crepe-browser",
-        modelUrl: frontendSettings.browserModelUrl,
-        sampleRate: frontendSettings.browserSampleRate,
-        hopLength: frameData.hopLength,
-        frameSize: frontendSettings.browserFrameSize
-      }
-    };
-  } catch (error) {
-    if (isPitchAnalysisAbortError(error)) {
-      throw error;
-    }
-    throw new Error(`Browser CREPE error: ${error.message || error}`);
-  } finally {
-    releaseFrontendAbortController(abortController);
-  }
-}
-
-function resolveTensorflowRuntime() {
-  const tfRuntime = typeof window !== "undefined" ? window.tf : null;
-  if (!tfRuntime || typeof tfRuntime.loadLayersModel !== "function") {
-    throw new Error("TensorFlow.js runtime not available.");
-  }
-  return tfRuntime;
-}
-
-async function ensureCrepeBrowserModel(tfRuntime, frontendSettings) {
-  const modelUrl = frontendSettings.browserModelUrl;
-  if (state.crepeBrowserModel && state.crepeBrowserModelUrl === modelUrl) {
-    return state.crepeBrowserModel;
-  }
-  if (state.crepeBrowserModel && typeof state.crepeBrowserModel.dispose === "function") {
-    state.crepeBrowserModel.dispose();
-  }
-
-  await setPreferredTfBackend(tfRuntime);
-  const model = await tfRuntime.loadLayersModel(modelUrl);
-  state.crepeBrowserModel = model;
-  state.crepeBrowserModelUrl = modelUrl;
-  return model;
-}
-
-async function setPreferredTfBackend(tfRuntime) {
-  const candidates = ["webgl", "cpu"];
-  for (const backend of candidates) {
-    try {
-      const available = typeof tfRuntime.findBackend === "function"
-        ? Boolean(tfRuntime.findBackend(backend))
-        : true;
-      if (!available) {
-        continue;
-      }
-      const switched = await tfRuntime.setBackend(backend);
-      if (switched) {
-        break;
-      }
-    } catch (_) {
-      continue;
-    }
-  }
-  await tfRuntime.ready();
-}
-
-function resampleMonoFloat32(samples, sampleRate, targetRate) {
-  if (!samples || !samples.length) {
-    return new Float32Array(0);
-  }
-  if (sampleRate === targetRate) {
-    return new Float32Array(samples);
-  }
-  const ratio = sampleRate / targetRate;
-  const outLength = Math.max(1, Math.round(samples.length / ratio));
-  const out = new Float32Array(outLength);
-  const lastIndex = samples.length - 1;
-  for (let i = 0; i < outLength; i++) {
-    const sourcePos = i * ratio;
-    const left = Math.min(lastIndex, Math.floor(sourcePos));
-    const right = Math.min(lastIndex, left + 1);
-    const frac = sourcePos - left;
-    out[i] = samples[left] * (1 - frac) + samples[right] * frac;
-  }
-  return out;
-}
-
-function buildCrepeBrowserFrames(samples, frameSize, sourceSampleRate, sourceHopLength, targetSampleRate) {
-  const hopSeconds = Math.max(1, sourceHopLength) / Math.max(1, sourceSampleRate);
-  const hopLength = Math.max(1, Math.round(hopSeconds * targetSampleRate));
-  const frameCount = Math.max(1, Math.floor((Math.max(samples.length, frameSize) - 1) / hopLength) + 1);
-  const frames = new Float32Array(frameCount * frameSize);
-  const frameTimes = new Array(frameCount);
-
-  for (let frameIndex = 0; frameIndex < frameCount; frameIndex++) {
-    const sourceStart = frameIndex * hopLength;
-    const baseOffset = frameIndex * frameSize;
-    frameTimes[frameIndex] = frameIndex * hopSeconds;
-    for (let i = 0; i < frameSize; i++) {
-      const sourceIndex = sourceStart + i;
-      frames[baseOffset + i] = sourceIndex < samples.length ? samples[sourceIndex] : 0;
-    }
-    normalizeCrepeFrameInPlace(frames, baseOffset, frameSize);
-  }
-
-  return {
-    frames,
-    frameTimes,
-    hopLength,
-    frameCount
-  };
-}
-
-function normalizeCrepeFrameInPlace(frames, offset, frameSize) {
-  let mean = 0;
-  for (let i = 0; i < frameSize; i++) {
-    mean += frames[offset + i];
-  }
-  mean /= frameSize;
-
-  let variance = 0;
-  for (let i = 0; i < frameSize; i++) {
-    const centered = frames[offset + i] - mean;
-    variance += centered * centered;
-  }
-  const std = Math.sqrt(variance / frameSize);
-  const invStd = std > 1e-6 ? 1 / std : 0;
-  for (let i = 0; i < frameSize; i++) {
-    frames[offset + i] = (frames[offset + i] - mean) * invStd;
-  }
-}
-
-async function inferCrepeBrowserPitchFrames(tfRuntime, model, frameData, frontendSettings, abortSignal) {
-  const frameSize = frontendSettings.browserFrameSize;
-  const frameCount = frameData.frameCount;
-  const batchSize = Math.max(1, Math.round(frontendSettings.browserBatchSize || 1));
-  const centWindow = Math.max(1, Math.round(frontendSettings.browserCentWindow || 4));
-  const f0Hz = new Array(frameCount).fill(null);
-  const periodicityFrames = new Array(frameCount).fill(0);
-
-  for (let batchStart = 0; batchStart < frameCount; batchStart += batchSize) {
-    throwIfFrontendRequestAborted(abortSignal);
-    const currentBatch = Math.min(batchSize, frameCount - batchStart);
-    const valueStart = batchStart * frameSize;
-    const valueEnd = valueStart + currentBatch * frameSize;
-    const batchFrames = frameData.frames.subarray(valueStart, valueEnd);
-
-    const predictionTensor = tfRuntime.tidy(() => {
-      const inputTensor = tfRuntime.tensor2d(batchFrames, [currentBatch, frameSize], "float32");
-      const prediction = model.predict(inputTensor);
-      return Array.isArray(prediction) ? prediction[0] : prediction;
-    });
-    const salience = await predictionTensor.data();
-    predictionTensor.dispose();
-
-    for (let localIndex = 0; localIndex < currentBatch; localIndex++) {
-      const salienceOffset = localIndex * CREPE_BINS;
-      const decoded = decodeCrepeSalienceFrame(salience, salienceOffset, centWindow);
-      const globalFrameIndex = batchStart + localIndex;
-      periodicityFrames[globalFrameIndex] = decoded.periodicity;
-      if (decoded.hz >= frontendSettings.fmin && decoded.hz <= frontendSettings.fmax) {
-        f0Hz[globalFrameIndex] = decoded.hz;
-      } else {
-        f0Hz[globalFrameIndex] = null;
-      }
-    }
-
-    if (typeof tfRuntime.nextFrame === "function" && batchStart > 0 && batchStart % (batchSize * 2) === 0) {
-      await tfRuntime.nextFrame();
-    }
-  }
-
-  return { f0Hz, periodicityFrames };
-}
-
-function decodeCrepeSalienceFrame(salience, offset, centWindow) {
-  let maxValue = -Infinity;
-  let maxBin = 0;
-  for (let i = 0; i < CREPE_BINS; i++) {
-    const value = salience[offset + i];
-    if (value > maxValue) {
-      maxValue = value;
-      maxBin = i;
-    }
-  }
-  const periodicity = clamp(Number.isFinite(maxValue) ? maxValue : 0, 0, 1);
-  if (periodicity <= 0) {
-    return { hz: 0, periodicity: 0 };
-  }
-
-  const start = Math.max(0, maxBin - centWindow);
-  const end = Math.min(CREPE_BINS - 1, maxBin + centWindow);
-  let weightedCents = 0;
-  let weightTotal = 0;
-  for (let i = start; i <= end; i++) {
-    const weight = Math.max(0, salience[offset + i]);
-    weightedCents += weight * crepeBinToCents(i);
-    weightTotal += weight;
-  }
-  const cents = weightTotal > 0 ? weightedCents / weightTotal : crepeBinToCents(maxBin);
-  return {
-    hz: 10 * Math.pow(2, cents / 1200),
-    periodicity
-  };
-}
-
-function crepeBinToCents(binIndex) {
-  return CREPE_CENTS_BASE + CREPE_CENTS_PER_BIN * binIndex;
 }
 
 function buildAnalysisFromFrontendTrack(samples, sampleRate, frontendTrack, frontendSettings, reuseAnalysis) {
