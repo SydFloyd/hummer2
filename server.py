@@ -15,6 +15,10 @@ ROOT_DIR = Path(__file__).resolve().parent
 DEFAULT_HOST = os.environ.get("HUMMER_HOST", "0.0.0.0")
 DEFAULT_PORT = int(os.environ.get("PORT", os.environ.get("HUMMER_PORT", "8000")))
 DEFAULT_TORCH_THREADS = max(1, int(os.environ.get("HUMMER_TORCH_THREADS", "1")))
+DEFAULT_PRELOAD_MODEL = "full" if os.environ.get("HUMMER_PRELOAD_MODEL", "tiny") == "full" else "tiny"
+HEALTH_PATH = "/api/health"
+TORCHCREPE_TRACK_PATH = "/api/torchcrepe-track"
+INDEX_PATH = "/index.html"
 
 torch.set_num_threads(DEFAULT_TORCH_THREADS)
 try:
@@ -26,7 +30,7 @@ except RuntimeError:
 @lru_cache(maxsize=1)
 def detect_torch_device():
     if torch.cuda.is_available():
-        print("Cude detected")
+        print("CUDA detected")
         return "cuda:0"
     return "cpu"
 
@@ -50,8 +54,21 @@ def tensor_to_json_array(values):
     return output
 
 
+def normalize_model_name(value):
+    return "full" if value == "full" else "tiny"
+
+
+@lru_cache(maxsize=4)
+def warm_torchcrepe_model(device, model):
+    normalized_model = normalize_model_name(model)
+    torchcrepe.load.model(device, normalized_model)
+    return normalized_model
+
+
 def analyze_pitch_track(samples, sample_rate, hop_length, fmin, fmax, model, use_viterbi, pad):
     device = detect_torch_device()
+    normalized_model = normalize_model_name(model)
+    warm_torchcrepe_model(device, normalized_model)
     decoder = torchcrepe.decode.viterbi if use_viterbi else torchcrepe.decode.weighted_argmax
     waveform = torch.from_numpy(np.array(samples, dtype=np.float32, copy=True)).unsqueeze(0)
     with torch.inference_mode():
@@ -61,7 +78,7 @@ def analyze_pitch_track(samples, sample_rate, hop_length, fmin, fmax, model, use
             hop_length=hop_length,
             fmin=fmin,
             fmax=fmax,
-            model=model,
+            model=normalized_model,
             decoder=decoder,
             return_periodicity=True,
             device=device,
@@ -76,7 +93,7 @@ def analyze_pitch_track(samples, sample_rate, hop_length, fmin, fmax, model, use
         "periodicityFrames": tensor_to_json_array(periodicity_np),
         "frontend": {
             "type": "torchcrepe",
-            "model": model,
+            "model": normalized_model,
             "decoder": "viterbi" if use_viterbi else "weighted_argmax",
             "device": device,
             "hopLength": hop_length,
@@ -97,25 +114,26 @@ class HummerRequestHandler(SimpleHTTPRequestHandler):
 
     def do_GET(self):
         parsed = urlparse(self.path)
-        if parsed.path == "/api/health":
+        if parsed.path == HEALTH_PATH:
             self.respond_json(
                 {
                     "ok": True,
                     "device": detect_torch_device(),
                     "torchVersion": torch.__version__,
-                    "torchcrepeVersion": getattr(torchcrepe, "__version__", "unknown")
+                    "torchcrepeVersion": getattr(torchcrepe, "__version__", "unknown"),
+                    "preloadedModel": DEFAULT_PRELOAD_MODEL
                 }
             )
             return
         if parsed.path == "/":
-            self.path = "/index.html"
+            self.path = INDEX_PATH
         else:
             self.path = parsed.path
         super().do_GET()
 
     def do_POST(self):
         parsed = urlparse(self.path)
-        if parsed.path != "/api/torchcrepe-track":
+        if parsed.path != TORCHCREPE_TRACK_PATH:
             self.respond_json({"error": "Not found."}, status=HTTPStatus.NOT_FOUND)
             return
 
@@ -135,8 +153,7 @@ class HummerRequestHandler(SimpleHTTPRequestHandler):
         hop_length = normalize_query_value(query, "hop_length", 256, int)
         fmin = normalize_query_value(query, "fmin", 65.0, float)
         fmax = normalize_query_value(query, "fmax", 1200.0, float)
-        model = query.get("model", ["tiny"])[0]
-        model = "full" if model == "full" else "tiny"
+        model = normalize_model_name(query.get("model", [DEFAULT_PRELOAD_MODEL])[0])
         use_viterbi = query.get("viterbi", ["1"])[0] != "0"
         pad = query.get("pad", ["1"])[0] != "0"
 
@@ -183,6 +200,12 @@ class HummerRequestHandler(SimpleHTTPRequestHandler):
 
 
 def main():
+    device = detect_torch_device()
+    try:
+        warmed = warm_torchcrepe_model(device, DEFAULT_PRELOAD_MODEL)
+        print(f"Preloaded TorchCREPE {warmed} model on {device}.")
+    except Exception as error:
+        print(f"TorchCREPE preload failed on {device}: {error}")
     server = ThreadingHTTPServer((DEFAULT_HOST, DEFAULT_PORT), HummerRequestHandler)
     print(f"Hummer server running at http://{DEFAULT_HOST}:{DEFAULT_PORT}")
     server.serve_forever()
