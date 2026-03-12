@@ -5,20 +5,39 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      target_environment:
+        description: "GitHub environment to deploy from"
+        required: true
+        default: "preview"
+        type: choice
+        options:
+          - preview
+          - production
 
 concurrency:
-  group: fly-deploy-main
+  group: fly-deploy-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    environment: ${{ github.event_name == 'workflow_dispatch' && inputs.target_environment || 'production' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Setup flyctl
         uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Validate Fly token
+        run: |
+          if [ -z "$FLY_API_TOKEN" ]; then
+            echo "FLY_API_TOKEN is empty. Add it to the selected GitHub environment secrets."
+            exit 1
+          fi
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
 
       - name: Deploy
         run: flyctl deploy --remote-only
