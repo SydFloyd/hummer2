@@ -58,22 +58,23 @@ const APP_CONFIG = {
   },
   analysis: {
     pitchFrameSize: 2048,
-    pitchHopSize: 256,
+    pitchHopSize: 320,
     trimTailMs: 110,
     minFrameEnergy: 1e-7,
     pitchFrontend: {
       apiPath: "/api/torchcrepe-track",
       defaultModel: "tiny",
-      defaultUseViterbi: true,
+      defaultUseViterbi: false,
+      targetSampleRate: 16000,
       fmin: 65,
       fmax: 1200,
       pitchSmoothAmount: 0.14,
       gapFillFrames: 2
     },
     segmentation: {
-      onsetWindowFrames: 6,
-      slopeWindowFrames: 5,
-      plateauWindowFrames: 7,
+      onsetWindowFrames: 2,
+      slopeWindowFrames: 2,
+      plateauWindowFrames: 2,
       voicedEvidenceWeight: 3.6,
       unvoicedStateBias: 2.6,
       changeBasePenalty: 0.72,
@@ -1321,14 +1322,21 @@ async function rerunPitchAnalysis(options = {}) {
 
 async function analyzeSamplesWithCurrentPitchSettings(samples, sampleRate, reuseAnalysis = null) {
   const frontendSettings = readPitchFrontendSettingsFromUi();
+  const frontendInput = preparePitchFrontendInput(samples, sampleRate, frontendSettings.targetSampleRate);
   const reusableFrontendTrack = reuseAnalysis && hasReusableFrontendTrack(reuseAnalysis, frontendSettings)
     ? reuseAnalysis.frontendTrack
     : null;
   const frontendTrack = reusableFrontendTrack
-    || await requestTorchcrepeFrontendTrack(samples, sampleRate, frontendSettings);
+    || await requestTorchcrepeFrontendTrack(frontendInput.samples, frontendInput.sampleRate, frontendSettings);
   return {
     frontendSettings,
-    analysis: buildAnalysisFromFrontendTrack(samples, sampleRate, frontendTrack, frontendSettings, reuseAnalysis)
+    analysis: buildAnalysisFromFrontendTrack(
+      frontendInput.samples,
+      frontendInput.sampleRate,
+      frontendTrack,
+      frontendSettings,
+      reuseAnalysis
+    )
   };
 }
 
@@ -1353,6 +1361,7 @@ function readPitchFrontendSettingsFromUi() {
       APP_CONFIG.controls.stabilitySensitivity.defaultValue
     ),
     apiPath: defaults.apiPath,
+    targetSampleRate: defaults.targetSampleRate,
     hopLength: APP_CONFIG.analysis.pitchHopSize,
     fmin: defaults.fmin,
     fmax: defaults.fmax
@@ -1658,6 +1667,7 @@ function hasReusableFrontendTrack(reuseAnalysis, frontendSettings) {
   const settings = reuseAnalysis.frontendTrack.settings;
   return settings.model === frontendSettings.model
     && settings.useViterbi === frontendSettings.useViterbi
+    && settings.sampleRate === frontendSettings.targetSampleRate
     && settings.hopLength === frontendSettings.hopLength
     && settings.fmin === frontendSettings.fmin
     && settings.fmax === frontendSettings.fmax;
@@ -1725,12 +1735,45 @@ async function requestTorchcrepeFrontendTrack(samples, sampleRate, frontendSetti
     settings: {
       model: frontendSettings.model,
       useViterbi: frontendSettings.useViterbi,
+      sampleRate,
       hopLength: frontendSettings.hopLength,
       fmin: frontendSettings.fmin,
       fmax: frontendSettings.fmax
     },
     frontend: payload.frontend || null
   };
+}
+
+function preparePitchFrontendInput(samples, sampleRate, targetSampleRate) {
+  const sourceRate = Number(sampleRate);
+  const desiredRate = Number(targetSampleRate);
+  if (!Number.isFinite(sourceRate) || sourceRate <= 0) {
+    return { samples, sampleRate };
+  }
+  if (!Number.isFinite(desiredRate) || desiredRate <= 0 || desiredRate >= sourceRate) {
+    return { samples, sampleRate: sourceRate };
+  }
+  return {
+    samples: resampleLinear(samples, sourceRate, desiredRate),
+    sampleRate: desiredRate
+  };
+}
+
+function resampleLinear(samples, sourceRate, targetRate) {
+  const ratio = sourceRate / targetRate;
+  const sourceLength = samples.length;
+  const targetLength = Math.max(1, Math.round(sourceLength / ratio));
+  const output = new Float32Array(targetLength);
+
+  for (let i = 0; i < targetLength; i++) {
+    const position = i * ratio;
+    const index = Math.floor(position);
+    const frac = position - index;
+    const left = samples[Math.min(index, sourceLength - 1)];
+    const right = samples[Math.min(index + 1, sourceLength - 1)];
+    output[i] = left + (right - left) * frac;
+  }
+  return output;
 }
 
 function buildAnalysisFromFrontendTrack(samples, sampleRate, frontendTrack, frontendSettings, reuseAnalysis) {

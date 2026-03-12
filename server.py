@@ -1,5 +1,6 @@
 import json
 import os
+from functools import lru_cache
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -11,9 +12,18 @@ import torchcrepe
 
 
 ROOT_DIR = Path(__file__).resolve().parent
-DEFAULT_PORT = int(os.environ.get("HUMMER_PORT", "8000"))
+DEFAULT_HOST = os.environ.get("HUMMER_HOST", "0.0.0.0")
+DEFAULT_PORT = int(os.environ.get("PORT", os.environ.get("HUMMER_PORT", "8000")))
+DEFAULT_TORCH_THREADS = max(1, int(os.environ.get("HUMMER_TORCH_THREADS", "1")))
+
+torch.set_num_threads(DEFAULT_TORCH_THREADS)
+try:
+    torch.set_num_interop_threads(1)
+except RuntimeError:
+    pass
 
 
+@lru_cache(maxsize=1)
 def detect_torch_device():
     if torch.cuda.is_available():
         print("Cude detected")
@@ -173,8 +183,8 @@ class HummerRequestHandler(SimpleHTTPRequestHandler):
 
 
 def main():
-    server = ThreadingHTTPServer(("127.0.0.1", DEFAULT_PORT), HummerRequestHandler)
-    print(f"Hummer server running at http://127.0.0.1:{DEFAULT_PORT}")
+    server = ThreadingHTTPServer((DEFAULT_HOST, DEFAULT_PORT), HummerRequestHandler)
+    print(f"Hummer server running at http://{DEFAULT_HOST}:{DEFAULT_PORT}")
     server.serve_forever()
 
 
