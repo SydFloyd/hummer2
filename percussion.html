@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hummer Percussion Lab</title>
+  <link rel="icon" type="image/png" sizes="32x32" href="assets/hummer_logo_32.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css?v=20260312p">
+</head>
+<body>
+  <main class="app-shell">
+    <header class="app-header">
+      <img src="assets/hummer_logo.png" alt="Hummer logo" class="logo">
+      <div class="header-copy">
+        <h1>Percussion Lab</h1>
+        <p>Capture up to three vocal prototypes per drum class, then classify detected hits from that reference pool.</p>
+        <nav class="module-ribbon" aria-label="Lab mode">
+          <a class="module-ribbon-link" href="/index.html">Melody</a>
+          <a class="module-ribbon-link active" href="/percussion.html" aria-current="page">Percussion</a>
+        </nav>
+      </div>
+    </header>
+
+    <section class="panel controls">
+      <div class="button-row">
+        <button id="startPercBtn" class="transport-symbol-btn" type="button" aria-label="Start recording clip" title="Start recording clip">&#x25cf;</button>
+        <button id="stopPercBtn" class="transport-symbol-btn" type="button" aria-label="Stop recording or playback" title="Stop recording or playback" disabled>&#x25a0;</button>
+        <button id="playPercBtn" class="transport-symbol-btn" type="button" aria-label="Play detected pattern" title="Play detected pattern" disabled>&#x25b6;</button>
+        <button id="clearPercBtn" type="button" disabled>Clear Clip</button>
+      </div>
+
+      <div class="perc-controls-grid">
+        <label>
+          Onset Sensitivity
+          <input id="percOnsetSensitivity" type="range" min="0.6" max="2.8" step="0.05" value="1.4">
+          <span id="percOnsetSensitivityValue">1.40</span>
+        </label>
+        <label>
+          Noise Floor
+          <input id="percNoiseFloor" type="range" min="0" max="0.7" step="0.01" value="0.11">
+          <span id="percNoiseFloorValue">0.11</span>
+        </label>
+        <label>
+          Min Hit Gap (ms)
+          <input id="percMinGapMs" type="range" min="30" max="260" step="5" value="90">
+          <span id="percMinGapMsValue">90</span>
+        </label>
+        <label>
+          Attack Weight
+          <input id="percAttackWeight" type="range" min="0" max="1" step="0.01" value="0.68">
+          <span id="percAttackWeightValue">0.68</span>
+        </label>
+        <label>
+          High-Band Weight
+          <input id="percHighWeight" type="range" min="0" max="1" step="0.01" value="0.32">
+          <span id="percHighWeightValue">0.32</span>
+        </label>
+        <label>
+          Reject Distance
+          <input id="percRejectDistance" type="range" min="0.4" max="6" step="0.05" value="4.20">
+          <span id="percRejectDistanceValue">4.20</span>
+        </label>
+      </div>
+
+      <div class="perc-calibration-panel">
+        <div class="perc-calibration-head">
+          <h3>Prototype Calibration</h3>
+          <button id="clearAllProtoBtn" type="button">Clear All Prototypes</button>
+        </div>
+        <p class="perc-calibration-subtext">Record up to five examples per class in your current environment and microphone setup. Prototypes are auto-saved in your browser.</p>
+        <div class="perc-proto-grid">
+          <div class="perc-proto-row">
+            <span class="perc-proto-label">Kick</span>
+            <span id="kickProtoCount" class="perc-proto-count">0 / 5</span>
+            <button id="captureKickBtn" type="button">Capture</button>
+            <button id="clearKickBtn" type="button">Clear</button>
+          </div>
+          <div class="perc-proto-row">
+            <span class="perc-proto-label">Snare</span>
+            <span id="snareProtoCount" class="perc-proto-count">0 / 5</span>
+            <button id="captureSnareBtn" type="button">Capture</button>
+            <button id="clearSnareBtn" type="button">Clear</button>
+          </div>
+          <div class="perc-proto-row">
+            <span class="perc-proto-label">Hi-Hat</span>
+            <span id="hatProtoCount" class="perc-proto-count">0 / 5</span>
+            <button id="captureHatBtn" type="button">Capture</button>
+            <button id="clearHatBtn" type="button">Clear</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel viz-panel">
+      <h2>Detected Percussion Timeline</h2>
+      <canvas id="percTimelineCanvas" width="1200" height="300"></canvas>
+      <div id="percClassSummary" class="percussion-summary"></div>
+      <div class="percussion-debug-wrap">
+        <h3>Onset Debug</h3>
+        <canvas id="percDebugCanvas" width="1200" height="260"></canvas>
+        <div id="percDebugSummary" class="percussion-summary"></div>
+      </div>
+    </section>
+
+    <section class="panel status-panel">
+      <div id="percStatusText">Idle</div>
+      <div class="stats">
+        <span>Clip Duration: <strong id="percDurationValue">-</strong></span>
+        <span>Detected Hits: <strong id="percHitCountValue">-</strong></span>
+        <span>Labeled Hits: <strong id="percLabeledCountValue">-</strong></span>
+        <span>Prototype Pool: <strong id="percProtoPoolValue">0</strong></span>
+      </div>
+    </section>
+
+    <footer class="app-footer">
+      <span>Single-voice percussion only. Tune onset controls separately from prototype calibration.</span>
+    </footer>
+  </main>
+
+  <script src="audio-core.js?v=20260310a"></script>
+  <script src="percussion.js?v=20260312p"></script>
+</body>
+</html>

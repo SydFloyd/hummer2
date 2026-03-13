@@ -19,6 +19,7 @@ DEFAULT_PRELOAD_MODEL = "full" if os.environ.get("HUMMER_PRELOAD_MODEL", "tiny")
 HEALTH_PATH = "/api/health"
 TORCHCREPE_TRACK_PATH = "/api/torchcrepe-track"
 INDEX_PATH = "/index.html"
+PERCUSSION_PAGE_PATH = "/percussion.html"
 
 torch.set_num_threads(DEFAULT_TORCH_THREADS)
 try:
@@ -127,6 +128,8 @@ class HummerRequestHandler(SimpleHTTPRequestHandler):
             return
         if parsed.path == "/":
             self.path = INDEX_PATH
+        elif parsed.path in ("/percussion", "/percussion/"):
+            self.path = PERCUSSION_PAGE_PATH
         else:
             self.path = parsed.path
         super().do_GET()

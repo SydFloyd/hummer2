@@ -1,4 +1,4 @@
-# Hummer Architecture (Pre-Percussion)
+# Hummer Architecture
 
 ## Current App Shape
 - Frontend is static HTML/CSS/JS served by `server.py`.
@@ -11,6 +11,7 @@
 - Backend provides:
   - `GET /api/health`
   - `POST /api/torchcrepe-track`
+  - static route: `/percussion` -> `percussion.html`
 
 ## Recent Cleanup
 - Shared frontend utilities moved into `audio-core.js` and exposed as `window.HummerCore`.
@@ -23,24 +24,23 @@
   - model normalization helpers
   - startup model preload (`HUMMER_PRELOAD_MODEL`)
 
-## Percussion Module Target Layout
-- Keep melody module intact.
-- Add a dedicated percussion page and script:
+## Percussion Module Layout
+- Melody module remains intact (`index.html` + `app.js`).
+- Percussion module is isolated to:
   - `percussion.html`
   - `percussion.js`
-- Keep shared low-level helpers in `audio-core.js`.
-- Add backend endpoint for percussion inference, separate from melody:
-  - proposed: `POST /api/percussion-track`
+- Percussion analysis is currently client-side:
+  - onset detection and gating are handled locally
+  - hit class assignment uses user calibration prototypes (up to 3 per class)
+  - prototype data persists in browser `localStorage`
+- Shared low-level helpers remain in `audio-core.js`.
 
-## Contract Guidelines for New Modules
+## Module Guidelines
 - Frontend modules should own their own state and DOM bindings.
 - Shared logic goes into:
   - `audio-core.js` for math/audio helpers
-  - backend helper functions in `server.py` (or split module files later if size grows)
-- API responses should include:
-  - model metadata (`model`, `device`, decoder/settings)
-  - per-frame or per-event confidence values
-  - timing arrays in seconds
+  - backend helper functions in `server.py` for server-resident inference paths
+- If/when percussion moves server-side, keep onset and classification contracts separate so they can be tuned independently.
 
 ## Next Refactor Trigger
 - When `app.js` exceeds practical maintainability for melody-only work, split it into:
