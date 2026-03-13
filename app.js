@@ -41,6 +41,8 @@ const PITCH_MAX_MIDI = 76; // E5
 const DEFAULT_CONTINUOUS_DYNAMICS = true;
 const DEFAULT_RAW_PORTAMENTO_ENABLED = false;
 const DEFAULT_RAW_GRAVITY_ENABLED = false;
+const DEFAULT_PLAYBACK_DEVICE = "synth";
+const PLAYBACK_DEVICES = ["synth", "sampler"];
 const APP_CONFIG = {
   controls: {
     gateMultiplier: { min: 1.2, max: 6, step: 0.1, defaultValue: 2.5 },
@@ -67,7 +69,10 @@ const APP_CONFIG = {
     ampAttackMs: { min: 1, max: 300, step: 1, defaultValue: 8 },
     ampDecayMs: { min: 5, max: 900, step: 5, defaultValue: 120 },
     ampSustainPct: { min: 0, max: 100, step: 1, defaultValue: 92 },
-    ampReleaseMs: { min: 10, max: 1200, step: 5, defaultValue: 130 }
+    ampReleaseMs: { min: 10, max: 1200, step: 5, defaultValue: 130 },
+    samplerToneCutoff: { min: 500, max: 9000, step: 50, defaultValue: 5200 },
+    samplerStartOffsetPct: { min: 0, max: 30, step: 1, defaultValue: 2 },
+    samplerReleaseMs: { min: 20, max: 1200, step: 5, defaultValue: 260 }
   },
   pitch: {
     minHz: 70,
@@ -136,6 +141,17 @@ const APP_CONFIG = {
       voice2Enabled: true,
       filterEnvelopeDepthOctaves: 1.1
     },
+    sampler: {
+      voice: "piano-custom",
+      assetPath: "assets/samples/piano-c4.wav",
+      toneCutoffHz: 5200,
+      startOffsetPct: 0.02,
+      releaseMs: 260,
+      sampleDurationSec: 2.8,
+      rootMidi: 60,
+      loopStartSec: 0.42,
+      loopEndSec: 2.62
+    },
     rawPlayback: {
       releaseMs: 30,
       maxGain: 0.5,
@@ -189,13 +205,17 @@ const PRESET_CONTROL_SPECS = [
   { id: "ampDecayMs", type: "number" },
   { id: "ampSustainPct", type: "number" },
   { id: "ampReleaseMs", type: "number" },
+  { id: "samplerVoice", type: "string" },
+  { id: "samplerToneCutoff", type: "number" },
+  { id: "samplerStartOffsetPct", type: "number" },
+  { id: "samplerReleaseMs", type: "number" },
   { id: "synthVoice2Enabled", type: "boolean" },
   { id: "synthVoice2Detune", type: "number" },
   { id: "synthVoice2Mix", type: "number" },
   { id: "synthOutputGain", type: "number" },
   { id: "continuousDynamics", type: "boolean" }
 ];
-const PRESET_PLAY_MODES = ["raw", "auto", "original"];
+const PRESET_PLAY_MODES = ["raw", "auto"];
 
 const state = {
   mediaRecorder: null,
@@ -208,6 +228,7 @@ const state = {
   playbackContext: null,
   playbackEndTimer: null,
   playbackRefreshTimer: null,
+  lastPlaybackErrorMessage: null,
   pitchAnalysisRefreshTimer: null,
   pitchAnalysisRequestId: 0,
   pitchAnalysisAbortController: null,
@@ -218,6 +239,9 @@ const state = {
   synthPanelCollapsed: true,
   presetManifest: [],
   presetCache: {},
+  samplerSourceBuffer: null,
+  samplerSourceLoadPromise: null,
+  samplerSourceLoadError: null,
   autotuneConfig: {
     keyRoot: APP_CONFIG.autotune.defaultRoot,
     modeId: APP_CONFIG.autotune.defaultModeId
@@ -228,8 +252,11 @@ const els = {
   startBtn: document.getElementById("startBtn"),
   stopBtn: document.getElementById("stopBtn"),
   playSelectedBtn: document.getElementById("playSelectedBtn"),
+  playOriginalBtn: document.getElementById("playOriginalBtn"),
   loopToggleBtn: document.getElementById("loopToggleBtn"),
   playbackModeRadios: Array.from(document.querySelectorAll("input[name='playMode']")),
+  autoArticulationRadios: Array.from(document.querySelectorAll("input[name='autoArticulation']")),
+  playbackDeviceRadios: Array.from(document.querySelectorAll("input[name='playbackDevice']")),
   playScaleBtn: document.getElementById("playScaleBtn"),
   toggleControlsBtn: document.getElementById("toggleControlsBtn"),
   toggleSynthPanelBtn: document.getElementById("toggleSynthPanelBtn"),
@@ -238,6 +265,8 @@ const els = {
   synthTestBtn: document.getElementById("synthTestBtn"),
   selectionPanel: document.getElementById("selectionPanel"),
   synthSelectionPanel: document.getElementById("synthSelectionPanel"),
+  synthDevicePanel: document.getElementById("synthDevicePanel"),
+  samplerDevicePanel: document.getElementById("samplerDevicePanel"),
   continuousDynamics: document.getElementById("continuousDynamics"),
   gateMultiplier: document.getElementById("gateMultiplier"),
   gateMultiplierValue: document.getElementById("gateMultiplierValue"),
@@ -280,6 +309,13 @@ const els = {
   synthVoice2MixValue: document.getElementById("synthVoice2MixValue"),
   synthOutputGain: document.getElementById("synthOutputGain"),
   synthOutputGainValue: document.getElementById("synthOutputGainValue"),
+  samplerVoice: document.getElementById("samplerVoice"),
+  samplerToneCutoff: document.getElementById("samplerToneCutoff"),
+  samplerToneCutoffValue: document.getElementById("samplerToneCutoffValue"),
+  samplerStartOffsetPct: document.getElementById("samplerStartOffsetPct"),
+  samplerStartOffsetPctValue: document.getElementById("samplerStartOffsetPctValue"),
+  samplerReleaseMs: document.getElementById("samplerReleaseMs"),
+  samplerReleaseMsValue: document.getElementById("samplerReleaseMsValue"),
   synthAttackMs: document.getElementById("synthAttackMs"),
   synthAttackMsValue: document.getElementById("synthAttackMsValue"),
   synthDecayMs: document.getElementById("synthDecayMs"),
@@ -323,6 +359,7 @@ function bootstrap() {
   syncSynthControlState();
   syncRawPlaybackControlState();
   initializeSharedPresetLibrary();
+  preloadSamplerSourceBuffer().catch(() => {});
   drawPlaceholder(getMidiCanvas(), "Derived MIDI timeline appears after processing.");
 }
 
@@ -352,15 +389,21 @@ function applyControlConfig() {
   applyRangeConfig(els.ampDecayMs, APP_CONFIG.controls.ampDecayMs);
   applyRangeConfig(els.ampSustainPct, APP_CONFIG.controls.ampSustainPct);
   applyRangeConfig(els.ampReleaseMs, APP_CONFIG.controls.ampReleaseMs);
+  applyRangeConfig(els.samplerToneCutoff, APP_CONFIG.controls.samplerToneCutoff);
+  applyRangeConfig(els.samplerStartOffsetPct, APP_CONFIG.controls.samplerStartOffsetPct);
+  applyRangeConfig(els.samplerReleaseMs, APP_CONFIG.controls.samplerReleaseMs);
   els.noteDerivation.value = APP_CONFIG.detection.rawPitchReducer;
   els.pitchFrontendModel.value = APP_CONFIG.analysis.pitchFrontend.defaultModel;
   els.pitchUseViterbi.checked = APP_CONFIG.analysis.pitchFrontend.defaultUseViterbi;
   els.continuousDynamics.checked = DEFAULT_CONTINUOUS_DYNAMICS;
   els.rawPortamentoEnabled.checked = DEFAULT_RAW_PORTAMENTO_ENABLED;
   els.rawGravityEnabled.checked = DEFAULT_RAW_GRAVITY_ENABLED;
+  setAutoArticulationSelection("glide");
+  setPlaybackDeviceSelection(DEFAULT_PLAYBACK_DEVICE);
   els.synthOscillator.value = APP_CONFIG.playback.synth.oscillator;
   els.synthFilterType.value = APP_CONFIG.playback.synth.filterType;
   els.synthVoice2Enabled.checked = APP_CONFIG.playback.synth.voice2Enabled;
+  els.samplerVoice.value = APP_CONFIG.playback.sampler.voice;
 }
 
 function applyRangeConfig(input, config) {
@@ -405,11 +448,31 @@ function wireEvents() {
   els.startBtn.addEventListener("click", startRecording);
   els.stopBtn.addEventListener("click", handleStopButtonPress);
   els.playSelectedBtn.addEventListener("click", () => playSelectedMode(false));
+  els.playOriginalBtn.addEventListener("click", () => playOriginalOnce(false));
   els.loopToggleBtn.addEventListener("click", toggleLoopPlayback);
   for (const radio of els.playbackModeRadios) {
     radio.addEventListener("change", () => {
       syncPlayModeAvailability();
       renderMidiTimeline();
+    });
+  }
+  for (const radio of els.autoArticulationRadios) {
+    radio.addEventListener("change", () => {
+      syncPlayModeAvailability();
+      schedulePlaybackRefresh();
+    });
+  }
+  for (const radio of els.playbackDeviceRadios) {
+    radio.addEventListener("change", () => {
+      if (getSelectedPlaybackDevice() === "sampler") {
+        preloadSamplerSourceBuffer().catch((error) => {
+          const message = error && error.message ? error.message : String(error);
+          setStatus(message);
+        });
+      }
+      syncSynthControlState();
+      syncControlLabels();
+      schedulePlaybackRefresh();
     });
   }
   els.playScaleBtn.addEventListener("click", playSelectedScale);
@@ -485,6 +548,9 @@ function wireEvents() {
   bindSynthSlider(els.synthVoice2Detune);
   bindSynthSlider(els.synthVoice2Mix);
   bindSynthSlider(els.synthOutputGain);
+  bindSynthSlider(els.samplerToneCutoff);
+  bindSynthSlider(els.samplerStartOffsetPct);
+  bindSynthSlider(els.samplerReleaseMs);
   bindSynthSlider(els.synthAttackMs);
   bindSynthSlider(els.synthDecayMs);
   bindSynthSlider(els.synthSustainPct);
@@ -504,6 +570,10 @@ function wireEvents() {
   });
   els.synthVoice2Enabled.addEventListener("change", () => {
     syncSynthControlState();
+    syncControlLabels();
+    schedulePlaybackRefresh();
+  });
+  els.samplerVoice.addEventListener("change", () => {
     syncControlLabels();
     schedulePlaybackRefresh();
   });
@@ -541,6 +611,9 @@ function syncControlLabels() {
   els.synthVoice2DetuneValue.textContent = `${voice2Detune >= 0 ? "+" : ""}${voice2Detune}`;
   els.synthVoice2MixValue.textContent = `${Math.round(Number(els.synthVoice2Mix.value))}%`;
   els.synthOutputGainValue.textContent = `${Math.round(Number(els.synthOutputGain.value))}%`;
+  els.samplerToneCutoffValue.textContent = `${Math.round(Number(els.samplerToneCutoff.value))} Hz`;
+  els.samplerStartOffsetPctValue.textContent = `${Math.round(Number(els.samplerStartOffsetPct.value))}%`;
+  els.samplerReleaseMsValue.textContent = String(Math.round(Number(els.samplerReleaseMs.value)));
   els.synthAttackMsValue.textContent = String(Math.round(Number(els.synthAttackMs.value)));
   els.synthDecayMsValue.textContent = String(Math.round(Number(els.synthDecayMs.value)));
   els.synthSustainPctValue.textContent = `${Math.round(Number(els.synthSustainPct.value))}%`;
@@ -582,30 +655,51 @@ function syncSynthPanelState() {
   const collapsed = Boolean(state.synthPanelCollapsed);
   els.synthSelectionPanel.hidden = collapsed;
   els.toggleSynthPanelBtn.textContent = collapsed ? "\u25b8" : "\u25be";
-  els.toggleSynthPanelBtn.title = collapsed ? "Expand synth settings" : "Collapse synth settings";
-  els.toggleSynthPanelBtn.setAttribute("aria-label", collapsed ? "Expand synth settings" : "Collapse synth settings");
+  els.toggleSynthPanelBtn.title = collapsed ? "Expand playback device settings" : "Collapse playback device settings";
+  els.toggleSynthPanelBtn.setAttribute("aria-label", collapsed ? "Expand playback device settings" : "Collapse playback device settings");
   els.toggleSynthPanelBtn.setAttribute("aria-expanded", collapsed ? "false" : "true");
 }
 
 function syncSynthControlState() {
+  const playbackDevice = getSelectedPlaybackDevice();
+  const synthSelected = playbackDevice === "synth";
   const voice2Enabled = Boolean(els.synthVoice2Enabled.checked);
   const filterEnabled = els.synthFilterType.value !== "none";
   const ampEnvelopeEnabled = !Boolean(els.continuousDynamics.checked);
+  if (els.synthDevicePanel) {
+    els.synthDevicePanel.hidden = !synthSelected;
+  }
+  if (els.samplerDevicePanel) {
+    els.samplerDevicePanel.hidden = synthSelected;
+  }
+  for (const radio of els.playbackDeviceRadios) {
+    const label = radio.closest("label");
+    if (label) {
+      label.classList.toggle("active", radio.checked);
+    }
+  }
 
-  setControlEnabled(els.synthVoice2Detune, voice2Enabled);
-  setControlEnabled(els.synthVoice2Mix, voice2Enabled);
-  setControlEnabled(els.synthFilterQ, filterEnabled);
-  setControlEnabled(els.synthFilterCutoff, filterEnabled);
-  setControlEnabled(els.synthKeyboardTrackingPct, filterEnabled);
-  setControlEnabled(els.synthFilterEnvDepth, filterEnabled);
-  setControlEnabled(els.synthAttackMs, filterEnabled);
-  setControlEnabled(els.synthDecayMs, filterEnabled);
-  setControlEnabled(els.synthSustainPct, filterEnabled);
-  setControlEnabled(els.synthReleaseMs, filterEnabled);
-  setControlEnabled(els.ampAttackMs, ampEnvelopeEnabled);
-  setControlEnabled(els.ampDecayMs, ampEnvelopeEnabled);
-  setControlEnabled(els.ampSustainPct, ampEnvelopeEnabled);
-  setControlEnabled(els.ampReleaseMs, ampEnvelopeEnabled);
+  setControlEnabled(els.synthOscillator, synthSelected);
+  setControlEnabled(els.synthVoice2Enabled, synthSelected);
+  setControlEnabled(els.synthVoice2Detune, synthSelected && voice2Enabled);
+  setControlEnabled(els.synthVoice2Mix, synthSelected && voice2Enabled);
+  setControlEnabled(els.synthFilterType, synthSelected);
+  setControlEnabled(els.synthFilterQ, synthSelected && filterEnabled);
+  setControlEnabled(els.synthFilterCutoff, synthSelected && filterEnabled);
+  setControlEnabled(els.synthKeyboardTrackingPct, synthSelected && filterEnabled);
+  setControlEnabled(els.synthFilterEnvDepth, synthSelected && filterEnabled);
+  setControlEnabled(els.synthAttackMs, synthSelected && filterEnabled);
+  setControlEnabled(els.synthDecayMs, synthSelected && filterEnabled);
+  setControlEnabled(els.synthSustainPct, synthSelected && filterEnabled);
+  setControlEnabled(els.synthReleaseMs, synthSelected && filterEnabled);
+  setControlEnabled(els.ampAttackMs, synthSelected && ampEnvelopeEnabled);
+  setControlEnabled(els.ampDecayMs, synthSelected && ampEnvelopeEnabled);
+  setControlEnabled(els.ampSustainPct, synthSelected && ampEnvelopeEnabled);
+  setControlEnabled(els.ampReleaseMs, synthSelected && ampEnvelopeEnabled);
+  setControlEnabled(els.samplerVoice, !synthSelected);
+  setControlEnabled(els.samplerToneCutoff, !synthSelected);
+  setControlEnabled(els.samplerStartOffsetPct, !synthSelected);
+  setControlEnabled(els.samplerReleaseMs, !synthSelected);
 }
 
 function syncRawPlaybackControlState() {
@@ -644,10 +738,36 @@ function getSelectedPlaybackMode() {
   return active ? active.value : "raw";
 }
 
-function canPlayMode(mode) {
-  if (mode === "original") {
-    return Boolean(state.originalAudioBuffer);
+function getSelectedAutoArticulationMode() {
+  const active = els.autoArticulationRadios.find((radio) => radio.checked);
+  return active ? active.value : "glide";
+}
+
+function getSelectedPlaybackDevice() {
+  const active = els.playbackDeviceRadios.find((radio) => radio.checked);
+  const candidate = active ? active.value : DEFAULT_PLAYBACK_DEVICE;
+  return PLAYBACK_DEVICES.includes(candidate) ? candidate : DEFAULT_PLAYBACK_DEVICE;
+}
+
+function normalizePlaybackDevice(value) {
+  return PLAYBACK_DEVICES.includes(value) ? value : null;
+}
+
+function setPlaybackDeviceSelection(device) {
+  const normalized = normalizePlaybackDevice(device) || DEFAULT_PLAYBACK_DEVICE;
+  for (const radio of els.playbackDeviceRadios) {
+    radio.checked = radio.value === normalized;
   }
+}
+
+function setAutoArticulationSelection(mode) {
+  const normalized = mode === "distinct" ? "distinct" : "glide";
+  for (const radio of els.autoArticulationRadios) {
+    radio.checked = radio.value === normalized;
+  }
+}
+
+function canPlayMode(mode) {
   if (!state.analysis || !state.derived) {
     return false;
   }
@@ -678,8 +798,22 @@ function syncPlayModeAvailability() {
   const canPlay = canPlayMode(selected);
   const isRecording = Boolean(state.mediaRecorder && state.mediaRecorder.state === "recording");
   els.playSelectedBtn.disabled = isRecording || !canPlay;
+  syncAutoArticulationControlState(selected);
+  syncPlayOriginalButtonState(isRecording);
   syncScaleControlState();
   syncRawPlaybackControlState();
+}
+
+function syncAutoArticulationControlState(selectedMode = getSelectedPlaybackMode()) {
+  const enabled = selectedMode === "auto";
+  for (const radio of els.autoArticulationRadios) {
+    setControlEnabled(radio, enabled);
+  }
+}
+
+function syncPlayOriginalButtonState(isRecording = Boolean(state.mediaRecorder && state.mediaRecorder.state === "recording")) {
+  const hasOriginal = Boolean(state.originalAudioBuffer);
+  els.playOriginalBtn.disabled = isRecording || !hasOriginal;
 }
 
 function isPlaybackActive() {
@@ -743,7 +877,7 @@ function schedulePlaybackRefresh() {
     return;
   }
   const selectedMode = getSelectedPlaybackMode();
-  if (selectedMode === "original" || !canPlayMode(selectedMode)) {
+  if (!canPlayMode(selectedMode)) {
     return;
   }
   clearPlaybackRefreshTimer();
@@ -754,7 +888,7 @@ function schedulePlaybackRefresh() {
       return;
     }
     const liveMode = getSelectedPlaybackMode();
-    if (liveMode === "original" || !canPlayMode(liveMode)) {
+    if (!canPlayMode(liveMode)) {
       return;
     }
     playSelectedMode(true);
@@ -804,13 +938,18 @@ async function initializeSharedPresetLibrary() {
     }
     const manifest = await response.json();
     const entries = Array.isArray(manifest.presets) ? manifest.presets : [];
-    state.presetManifest = entries.filter((entry) =>
-      entry &&
-      typeof entry.id === "string" &&
-      entry.id.trim() &&
-      typeof entry.file === "string" &&
-      entry.file.trim()
-    );
+    state.presetManifest = entries
+      .filter((entry) =>
+        entry &&
+        typeof entry.id === "string" &&
+        entry.id.trim() &&
+        typeof entry.file === "string" &&
+        entry.file.trim()
+      )
+      .map((entry) => ({
+        ...entry,
+        device: normalizePlaybackDevice(entry.device) || "synth"
+      }));
     state.presetCache = {};
     populatePresetSelectFromManifest();
   } catch (_) {
@@ -820,16 +959,80 @@ async function initializeSharedPresetLibrary() {
   }
 }
 
+async function preloadSamplerSourceBuffer() {
+  if (state.samplerSourceBuffer) {
+    return state.samplerSourceBuffer;
+  }
+  if (state.samplerSourceLoadPromise) {
+    return state.samplerSourceLoadPromise;
+  }
+  const samplerPath = APP_CONFIG.playback.sampler.assetPath;
+  state.samplerSourceLoadPromise = (async () => {
+    try {
+      const response = await fetch(samplerPath, { cache: "no-store" });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      const arrayBuffer = await response.arrayBuffer();
+      if (!state.audioContext || state.audioContext.state === "closed") {
+        state.audioContext = createAudioContext();
+      }
+      const decoded = await state.audioContext.decodeAudioData(arrayBuffer.slice(0));
+      if (!decoded || decoded.length < 1) {
+        throw new Error("Decoded buffer is empty.");
+      }
+      state.samplerSourceBuffer = decoded;
+      state.samplerSourceLoadError = null;
+      return decoded;
+    } catch (error) {
+      const message = error && error.message ? error.message : String(error);
+      state.samplerSourceBuffer = null;
+      state.samplerSourceLoadError = `Sampler source load error: ${samplerPath} (${message})`;
+      throw new Error(state.samplerSourceLoadError);
+    } finally {
+      state.samplerSourceLoadPromise = null;
+    }
+  })();
+  return state.samplerSourceLoadPromise;
+}
+
+function getSamplerSourceBufferOrThrow() {
+  if (state.samplerSourceBuffer) {
+    return state.samplerSourceBuffer;
+  }
+  if (state.samplerSourceLoadError) {
+    throw new Error(state.samplerSourceLoadError);
+  }
+  if (!state.samplerSourceLoadPromise) {
+    preloadSamplerSourceBuffer().catch(() => {});
+  }
+  throw new Error(`Sampler source not ready: ${APP_CONFIG.playback.sampler.assetPath}`);
+}
+
 function populatePresetSelectFromManifest() {
   populatePresetControls();
   if (!els.presetSelect) {
     return;
   }
+  const synthGroup = document.createElement("optgroup");
+  synthGroup.label = "Synth Presets";
+  const samplerGroup = document.createElement("optgroup");
+  samplerGroup.label = "Sampler Presets";
   for (const entry of state.presetManifest) {
     const option = document.createElement("option");
     option.value = entry.id;
     option.textContent = entry.name || entry.id;
-    els.presetSelect.appendChild(option);
+    if ((entry.device || "synth") === "sampler") {
+      samplerGroup.appendChild(option);
+    } else {
+      synthGroup.appendChild(option);
+    }
+  }
+  if (synthGroup.children.length) {
+    els.presetSelect.appendChild(synthGroup);
+  }
+  if (samplerGroup.children.length) {
+    els.presetSelect.appendChild(samplerGroup);
   }
   if (!state.presetManifest.length) {
     const empty = document.createElement("option");
@@ -897,6 +1100,9 @@ async function loadSharedPreset(entry) {
   }
   const raw = await response.json();
   const preset = normalizePresetPayload(raw, entry.name || entry.id);
+  if (!normalizePlaybackDevice(preset.settings.playbackDevice)) {
+    preset.settings.playbackDevice = normalizePlaybackDevice(entry.device) || DEFAULT_PLAYBACK_DEVICE;
+  }
   state.presetCache[cacheKey] = preset;
   return preset;
 }
@@ -924,6 +1130,7 @@ function applyPresetPayloadToUi(preset) {
   }
   const settings = preset.settings;
   const requestedPlayMode = typeof settings.playMode === "string" ? settings.playMode : "";
+  const requestedPlaybackDevice = normalizePlaybackDevice(settings.playbackDevice);
   const legacyBendSmoothing = Number(settings.bendSmoothing);
   for (const spec of PRESET_CONTROL_SPECS) {
     if (!(spec.id in settings)) {
@@ -978,6 +1185,9 @@ function applyPresetPayloadToUi(preset) {
       radio.checked = true;
     }
   }
+  if (requestedPlaybackDevice) {
+    setPlaybackDeviceSelection(requestedPlaybackDevice);
+  }
 
   syncScaleControlState();
   syncSynthControlState();
@@ -1011,6 +1221,7 @@ async function resetAllControlsToDefaults() {
   if (rawModeRadio) {
     rawModeRadio.checked = true;
   }
+  setPlaybackDeviceSelection(DEFAULT_PLAYBACK_DEVICE);
 
   syncScaleControlState();
   syncSynthControlState();
@@ -1068,6 +1279,7 @@ async function startRecording() {
     setStatus("Recording... hum or sing a phrase, then stop.");
     els.startBtn.disabled = true;
     els.playSelectedBtn.disabled = true;
+    els.playOriginalBtn.disabled = true;
     els.playScaleBtn.disabled = true;
     syncStopButtonState();
   } catch (error) {
@@ -1200,6 +1412,52 @@ function startSynthTestNote() {
   const start = ctx.currentTime + 0.01;
   const peak = 0.3 * settings.outputGain;
 
+  if (settings.playbackDevice === "sampler") {
+    const samplerSettings = settings.sampler || APP_CONFIG.playback.sampler;
+    const source = ctx.createBufferSource();
+    try {
+      source.buffer = getOrCreateSamplerBuffer(ctx, samplerSettings);
+    } catch (error) {
+      const message = error && error.message ? error.message : String(error);
+      stopPlayback();
+      setStatus(`Sampler error: ${message}`);
+      return;
+    }
+    configureSamplerSourceLoop(source, samplerSettings);
+    source.playbackRate.setValueAtTime(samplerPlaybackRateForMidi(testMidi, samplerSettings), start);
+
+    const amp = ctx.createGain();
+    amp.gain.setValueAtTime(0.0001, start);
+    amp.gain.linearRampToValueAtTime(Math.max(0.0001, peak), start + 0.01);
+
+    const toneFilter = ctx.createBiquadFilter();
+    toneFilter.type = "lowpass";
+    toneFilter.frequency.setValueAtTime(
+      clamp(Number(samplerSettings.toneCutoffHz) || APP_CONFIG.playback.sampler.toneCutoffHz, 80, 16000),
+      start
+    );
+    toneFilter.Q.value = 0.65;
+
+    source.connect(toneFilter);
+    toneFilter.connect(amp);
+    amp.connect(master);
+
+    const startOffset = source.buffer.duration * clamp(Number(samplerSettings.startOffsetPct) || 0, 0, 0.45);
+    source.start(start, startOffset);
+
+    state.synthTestVoice = {
+      ctx,
+      amp,
+      settings,
+      sourceNodes: [source],
+      releaseSec: clamp(Number(samplerSettings.releaseSec) || APP_CONFIG.playback.sampler.releaseMs / 1000, 0.02, 4)
+    };
+    els.synthTestBtn.classList.add("is-holding");
+    setStatus("Device test: sampler holding C4.");
+    syncStopButtonState();
+    return;
+  }
+
   const useFilter = settings.filterType !== "none";
   let voiceFilter = null;
   if (useFilter) {
@@ -1244,10 +1502,10 @@ function startSynthTestNote() {
     ctx,
     amp,
     settings,
-    oscillators
+    sourceNodes: oscillators.map((osc) => osc.node)
   };
   els.synthTestBtn.classList.add("is-holding");
-  setStatus("Synth test: holding C4.");
+  setStatus("Device test: synth holding C4.");
   syncStopButtonState();
 }
 
@@ -1268,14 +1526,20 @@ function stopSynthTestNote() {
     sustainLevel: 0.8,
     releaseSec: 0.12
   };
-  const releaseSec = Math.max(0.01, ampEnvelope.releaseSec);
+  const releaseSec = Math.max(0.01, Number(voice.releaseSec) || ampEnvelope.releaseSec);
   const currentGain = Math.max(0.0001, voice.amp.gain.value);
   voice.amp.gain.cancelScheduledValues(now);
   voice.amp.gain.setValueAtTime(currentGain, now);
   voice.amp.gain.linearRampToValueAtTime(0.0001, now + releaseSec);
 
-  for (const osc of voice.oscillators) {
-    osc.node.stop(now + releaseSec + 0.03);
+  for (const node of voice.sourceNodes || []) {
+    if (node && typeof node.stop === "function") {
+      try {
+        node.stop(now + releaseSec + 0.03);
+      } catch (_) {
+        // Node may already be stopped.
+      }
+    }
   }
 
   const testCtx = voice.ctx;
@@ -2600,7 +2864,7 @@ function renderMidiTimeline() {
   const rightPad = 8;
   const innerWidth = width - leftPad - rightPad;
   const amplitudeTrack = selectAmplitudeTimelineTrack(rawPlaybackData, autoPlaybackData);
-  const amplitudeActive = Boolean(els.continuousDynamics.checked) && getSelectedPlaybackMode() !== "original";
+  const amplitudeActive = Boolean(els.continuousDynamics.checked);
 
   drawAmplitudeTimelineOverlay(ctx, state.analysis, amplitudeTrack, {
     leftPad,
@@ -2901,6 +3165,7 @@ function readRawPlaybackSettingsFromUi() {
 }
 
 function readPlaybackSynthSettingsFromUi() {
+  const playbackDevice = getSelectedPlaybackDevice();
   const oscillator = sanitizeChoice(
     els.synthOscillator.value,
     ["sine", "square", "sawtooth", "triangle"],
@@ -2988,7 +3253,28 @@ function readPlaybackSynthSettingsFromUi() {
     APP_CONFIG.controls.ampReleaseMs,
     APP_CONFIG.controls.ampReleaseMs.defaultValue
   ) / 1000;
+  const samplerVoice = sanitizeChoice(
+    els.samplerVoice.value,
+    ["piano-custom"],
+    APP_CONFIG.playback.sampler.voice
+  );
+  const samplerToneCutoffHz = sanitizeNumericSetting(
+    els.samplerToneCutoff.value,
+    APP_CONFIG.controls.samplerToneCutoff,
+    APP_CONFIG.controls.samplerToneCutoff.defaultValue
+  );
+  const samplerStartOffsetPct = sanitizeNumericSetting(
+    els.samplerStartOffsetPct.value,
+    APP_CONFIG.controls.samplerStartOffsetPct,
+    APP_CONFIG.controls.samplerStartOffsetPct.defaultValue
+  ) / 100;
+  const samplerReleaseSec = sanitizeNumericSetting(
+    els.samplerReleaseMs.value,
+    APP_CONFIG.controls.samplerReleaseMs,
+    APP_CONFIG.controls.samplerReleaseMs.defaultValue
+  ) / 1000;
   return {
+    playbackDevice,
     oscillator,
     filterType,
     filterCutoff,
@@ -3013,6 +3299,16 @@ function readPlaybackSynthSettingsFromUi() {
       decaySec: clamp(ampDecaySec, 0.001, 3),
       sustainLevel: clamp(ampSustainLevel, 0, 1),
       releaseSec: clamp(ampReleaseSec, 0.01, 4)
+    },
+    sampler: {
+      voice: samplerVoice,
+      toneCutoffHz: clamp(samplerToneCutoffHz, 80, 16000),
+      startOffsetPct: clamp(samplerStartOffsetPct, 0, 0.35),
+      releaseSec: clamp(samplerReleaseSec, 0.02, 4),
+      sampleDurationSec: APP_CONFIG.playback.sampler.sampleDurationSec,
+      rootMidi: APP_CONFIG.playback.sampler.rootMidi,
+      loopStartSec: APP_CONFIG.playback.sampler.loopStartSec,
+      loopEndSec: APP_CONFIG.playback.sampler.loopEndSec
     }
   };
 }
@@ -3028,10 +3324,6 @@ function playSelectedMode(fromLoop = false) {
     return;
   }
 
-  if (mode === "original") {
-    playOriginalSample(fromLoop);
-    return;
-  }
   if (mode === "raw") {
     playContinuousPitchMode("raw", fromLoop);
     return;
@@ -3055,10 +3347,22 @@ function playContinuousPitchMode(mode, fromLoop = false) {
     return;
   }
   const synthSettings = readPlaybackSynthSettingsFromUi();
+  const deviceLabel = synthSettings.playbackDevice === "sampler" ? "sampler" : "synth";
   const rawPlaybackSettings = readRawPlaybackSettingsFromUi();
-  const segments = buildContinuousPitchModeSegments(state.analysis, state.derived, mode, rawPlaybackSettings);
+  const autotuneDistinct = mode === "auto" && getSelectedAutoArticulationMode() === "distinct";
+  const segments = buildContinuousPitchModeSegments(
+    state.analysis,
+    state.derived,
+    mode,
+    rawPlaybackSettings,
+    autotuneDistinct
+  );
   const played = playContinuousSegments(segments, synthSettings, () => playContinuousPitchMode(mode, true));
   if (!played) {
+    if (state.lastPlaybackErrorMessage) {
+      setStatus(state.lastPlaybackErrorMessage);
+      return;
+    }
     setStatus("No voiced frames available for continuous playback.");
     return;
   }
@@ -3071,14 +3375,16 @@ function playContinuousPitchMode(mode, fromLoop = false) {
       const gravityLabel = rawPlaybackSettings.gravityEnabled && gravityScale
         ? `${Math.round(rawPlaybackSettings.gravityAmount * 100)}% ${formatScaleName(gravityScale.keyRoot, gravityScale.modeId)}`
         : "off";
-      setStatus(`Playing raw pitch (portamento ${portamentoLabel}, gravity ${gravityLabel}).`);
+      setStatus(`Playing raw pitch via ${deviceLabel} (portamento ${portamentoLabel}, gravity ${gravityLabel}).`);
     } else {
-      setStatus("Playing autotuned continuous pitch.");
+      const articulation = autotuneDistinct ? "distinct" : "glide";
+      setStatus(`Playing autotuned ${articulation} mode via ${deviceLabel}.`);
     }
   }
 }
 
-function playOriginalSample(fromLoop = false) {
+function playOriginalOnce(fromLoop = false) {
+  void fromLoop;
   if (!state.originalAudioBuffer) {
     setStatus("No original recording available yet.");
     return;
@@ -3100,11 +3406,8 @@ function playOriginalSample(fromLoop = false) {
   source.stop(startAt + state.originalAudioBuffer.duration);
 
   const totalMs = Math.max(200, state.originalAudioBuffer.duration * 1000);
-  schedulePlaybackCompletion(totalMs, () => playOriginalSample(true));
-
-  if (!fromLoop) {
-    setStatus("Playing original recording...");
-  }
+  schedulePlaybackCompletion(totalMs, null);
+  setStatus("Playing original recording once...");
 }
 
 function getScaleForRawGravity() {
@@ -3117,7 +3420,7 @@ function getScaleForRawGravity() {
   return resolveScaleForPreview();
 }
 
-function buildContinuousPitchModeSegments(analysis, derived, mode, rawPlaybackSettings) {
+function buildContinuousPitchModeSegments(analysis, derived, mode, rawPlaybackSettings, autotuneDistinct = false) {
   const playbackData = mode === "raw"
     ? buildRawContinuousPlaybackData(analysis, derived, rawPlaybackSettings)
     : buildSmoothedContinuousPlaybackData(
@@ -3127,6 +3430,9 @@ function buildContinuousPitchModeSegments(analysis, derived, mode, rawPlaybackSe
     );
   if (!playbackData || !playbackData.midiTrack || !playbackData.midiTrack.length) {
     return [];
+  }
+  if (mode === "auto" && autotuneDistinct) {
+    return collectDistinctAutotuneSegmentsFromTracks(analysis, playbackData.midiTrack, playbackData.gainTrack);
   }
   return collectContinuousSegmentsFromTracks(analysis, playbackData.midiTrack, playbackData.gainTrack);
 }
@@ -3342,11 +3648,18 @@ function playSelectedScale(fromLoop = false) {
   const noteSeconds = 0.18;
   let maxEnd = 0;
 
-  for (let i = 0; i < notes.length; i++) {
-    const start = startAt + i * stepSeconds;
-    const end = start + noteSeconds;
-    triggerSynthVoice(ctx, midiToHz(notes[i]), start, end, master, "auto", synthSettings);
-    maxEnd = Math.max(maxEnd, end);
+  try {
+    for (let i = 0; i < notes.length; i++) {
+      const start = startAt + i * stepSeconds;
+      const end = start + noteSeconds;
+      triggerSynthVoice(ctx, midiToHz(notes[i]), start, end, master, "auto", synthSettings);
+      maxEnd = Math.max(maxEnd, end);
+    }
+  } catch (error) {
+    const message = error && error.message ? error.message : String(error);
+    stopPlayback();
+    setStatus(`Playback error: ${message}`);
+    return;
   }
 
   const totalMs = Math.max(200, (maxEnd - ctx.currentTime) * 1000);
@@ -3433,6 +3746,7 @@ function stopPlayback() {
 }
 
 function playContinuousSegments(segments, synthSettings, replayAction) {
+  state.lastPlaybackErrorMessage = null;
   if (!segments || !segments.length) {
     return false;
   }
@@ -3445,9 +3759,16 @@ function playContinuousSegments(segments, synthSettings, replayAction) {
 
   const startAt = ctx.currentTime + 0.05;
   let maxEnd = 0;
-  for (const segment of segments) {
-    triggerBendVoice(ctx, segment, startAt, master, synthSettings);
-    maxEnd = Math.max(maxEnd, startAt + segment.endTime);
+  try {
+    for (const segment of segments) {
+      triggerBendVoice(ctx, segment, startAt, master, synthSettings);
+      maxEnd = Math.max(maxEnd, startAt + segment.endTime);
+    }
+  } catch (error) {
+    const message = error && error.message ? error.message : String(error);
+    state.lastPlaybackErrorMessage = `Playback error: ${message}`;
+    stopPlayback();
+    return false;
   }
 
   const totalMs = Math.max(200, (maxEnd - ctx.currentTime) * 1000);
@@ -3580,6 +3901,174 @@ function scheduleFilterEnvelope(filterParam, start, end, baseCutoff, synthSettin
   filterParam.linearRampToValueAtTime(startCutoff, end + envelope.releaseSec);
 }
 
+function getOrCreateSamplerBuffer(ctx, samplerSettings) {
+  void ctx;
+  void samplerSettings;
+  return getSamplerSourceBufferOrThrow();
+}
+
+function configureSamplerSourceLoop(source, samplerSettings) {
+  if (!source || !source.buffer) {
+    return;
+  }
+  const durationSec = source.buffer.duration;
+  const loopStart = clamp(
+    Number(samplerSettings && samplerSettings.loopStartSec) || APP_CONFIG.playback.sampler.loopStartSec,
+    0,
+    Math.max(0, durationSec - 0.08)
+  );
+  const loopEnd = clamp(
+    Number(samplerSettings && samplerSettings.loopEndSec) || APP_CONFIG.playback.sampler.loopEndSec,
+    loopStart + 0.06,
+    durationSec
+  );
+  source.loop = true;
+  source.loopStart = loopStart;
+  source.loopEnd = loopEnd;
+}
+
+function samplerPlaybackRateForMidi(midiValue, samplerSettings) {
+  const rootMidi = Number(samplerSettings && samplerSettings.rootMidi) || APP_CONFIG.playback.sampler.rootMidi;
+  const rootHz = midiToHz(rootMidi);
+  const targetHz = midiToHz(clampPitchMidi(midiValue));
+  return clamp(targetHz / Math.max(1, rootHz), 0.125, 8);
+}
+
+function triggerSamplerVoice(
+  ctx,
+  freqHz,
+  start,
+  end,
+  destination,
+  mode,
+  synthSettings,
+  previousFreqHz = null,
+  portamentoSec = 0
+) {
+  const settings = synthSettings || readPlaybackSynthSettingsFromUi();
+  const samplerSettings = settings.sampler || APP_CONFIG.playback.sampler;
+  const source = ctx.createBufferSource();
+  source.buffer = getOrCreateSamplerBuffer(ctx, samplerSettings);
+  configureSamplerSourceLoop(source, samplerSettings);
+
+  const targetMidi = hzToMidi(Math.max(1, freqHz));
+  const targetRate = samplerPlaybackRateForMidi(targetMidi, samplerSettings);
+  const hasPreviousFreq = Number.isFinite(previousFreqHz) && previousFreqHz > 0;
+  const previousMidi = hasPreviousFreq ? hzToMidi(previousFreqHz) : targetMidi;
+  const startRate = samplerPlaybackRateForMidi(previousMidi, samplerSettings);
+  const glideSec = hasPreviousFreq ? clamp(portamentoSec || 0, 0, Math.max(0, (end - start) * 0.85)) : 0;
+  source.playbackRate.setValueAtTime(startRate, start);
+  if (glideSec > 0 && Math.abs(startRate - targetRate) > 1e-5) {
+    source.playbackRate.linearRampToValueAtTime(targetRate, start + glideSec);
+  } else {
+    source.playbackRate.setValueAtTime(targetRate, start);
+  }
+
+  const amp = ctx.createGain();
+  const peak = (mode === "raw" ? 0.34 : 0.3) * settings.outputGain;
+  const samplerReleaseSec = clamp(
+    Number(samplerSettings.releaseSec) || APP_CONFIG.playback.sampler.releaseMs / 1000,
+    0.02,
+    4
+  );
+  if (settings.followOriginalAmplitude) {
+    amp.gain.setValueAtTime(0.0001, start);
+    amp.gain.linearRampToValueAtTime(Math.max(0.0001, peak), start + 0.004);
+    amp.gain.setValueAtTime(Math.max(0.0001, peak), end);
+    amp.gain.linearRampToValueAtTime(0.0001, end + samplerReleaseSec);
+  } else {
+    scheduleAdsrEnvelope(amp.gain, start, end, peak, settings.ampEnvelope);
+  }
+
+  let toneFilter = null;
+  const toneCutoff = clamp(Number(samplerSettings.toneCutoffHz) || APP_CONFIG.playback.sampler.toneCutoffHz, 80, 16000);
+  if (Number.isFinite(toneCutoff)) {
+    toneFilter = ctx.createBiquadFilter();
+    toneFilter.type = "lowpass";
+    toneFilter.frequency.setValueAtTime(toneCutoff, start);
+    toneFilter.Q.value = 0.65;
+  }
+
+  if (toneFilter) {
+    source.connect(toneFilter);
+    toneFilter.connect(amp);
+  } else {
+    source.connect(amp);
+  }
+  amp.connect(destination);
+
+  const startOffset = source.buffer.duration * clamp(Number(samplerSettings.startOffsetPct) || 0, 0, 0.45);
+  const releaseSec = settings.followOriginalAmplitude
+    ? samplerReleaseSec
+    : Math.max(settings.ampEnvelope.releaseSec, samplerReleaseSec * 0.4);
+  source.start(start, startOffset);
+  source.stop(end + releaseSec + 0.05);
+}
+
+function triggerSamplerBendVoice(ctx, segment, startAt, destination, synthSettings) {
+  const settings = synthSettings || readPlaybackSynthSettingsFromUi();
+  const samplerSettings = settings.sampler || APP_CONFIG.playback.sampler;
+  const start = startAt + segment.startTime;
+  const end = startAt + segment.endTime;
+  const segmentDuration = Math.max(0.01, end - start);
+  const useAmpEnvelope = !settings.followOriginalAmplitude;
+  const envelopeSettings = useAmpEnvelope ? settings.ampEnvelope : null;
+  const samplerReleaseSec = clamp(
+    Number(samplerSettings.releaseSec) || APP_CONFIG.playback.sampler.releaseMs / 1000,
+    0.02,
+    4
+  );
+  const releaseSec = useAmpEnvelope
+    ? Math.max(samplerReleaseSec * 0.4, settings.ampEnvelope.releaseSec)
+    : Math.max(samplerReleaseSec, APP_CONFIG.playback.rawPlayback.releaseMs / 1000);
+
+  const source = ctx.createBufferSource();
+  source.buffer = getOrCreateSamplerBuffer(ctx, samplerSettings);
+  configureSamplerSourceLoop(source, samplerSettings);
+
+  const amp = ctx.createGain();
+  amp.gain.setValueAtTime(0.0001, start);
+  const firstRate = samplerPlaybackRateForMidi(segment.points[0].midi, samplerSettings);
+  source.playbackRate.setValueAtTime(firstRate, start);
+  const attackTime = Math.min(start + (useAmpEnvelope ? envelopeSettings.attackSec : 0.003), end);
+  const initialEnvelope = envelopeSettings ? envelopeMultiplierAtTime(0, segmentDuration, envelopeSettings) : 1;
+  const initialGain = segment.points[0].gain * initialEnvelope * settings.outputGain;
+  amp.gain.linearRampToValueAtTime(Math.max(0.0001, initialGain), Math.max(start + 0.003, attackTime));
+
+  for (let i = 1; i < segment.points.length; i++) {
+    const point = segment.points[i];
+    const t = startAt + point.time;
+    const rate = samplerPlaybackRateForMidi(point.midi, samplerSettings);
+    source.playbackRate.linearRampToValueAtTime(rate, t);
+    const relativeTime = clamp(t - start, 0, segmentDuration);
+    const envelope = envelopeSettings ? envelopeMultiplierAtTime(relativeTime, segmentDuration, envelopeSettings) : 1;
+    const targetGain = point.gain * envelope * settings.outputGain;
+    amp.gain.linearRampToValueAtTime(Math.max(0.0001, targetGain), t);
+  }
+  amp.gain.linearRampToValueAtTime(0.0001, end + releaseSec);
+
+  let toneFilter = null;
+  const toneCutoff = clamp(Number(samplerSettings.toneCutoffHz) || APP_CONFIG.playback.sampler.toneCutoffHz, 80, 16000);
+  if (Number.isFinite(toneCutoff)) {
+    toneFilter = ctx.createBiquadFilter();
+    toneFilter.type = "lowpass";
+    toneFilter.frequency.setValueAtTime(toneCutoff, start);
+    toneFilter.Q.value = 0.65;
+  }
+
+  if (toneFilter) {
+    source.connect(toneFilter);
+    toneFilter.connect(amp);
+  } else {
+    source.connect(amp);
+  }
+  amp.connect(destination);
+
+  const startOffset = source.buffer.duration * clamp(Number(samplerSettings.startOffsetPct) || 0, 0, 0.45);
+  source.start(start, startOffset);
+  source.stop(end + releaseSec + 0.05);
+}
+
 function triggerSynthVoice(
   ctx,
   freqHz,
@@ -3592,6 +4081,10 @@ function triggerSynthVoice(
   portamentoSec = 0
 ) {
   const settings = synthSettings || readPlaybackSynthSettingsFromUi();
+  if (settings.playbackDevice === "sampler") {
+    triggerSamplerVoice(ctx, freqHz, start, end, destination, mode, settings, previousFreqHz, portamentoSec);
+    return;
+  }
   const safeFreq = Math.max(1, freqHz);
   const midiValue = hzToMidi(safeFreq);
   const modeCutoffBoost = mode === "raw" ? 0 : 240;
@@ -3822,6 +4315,40 @@ function collectContinuousSegmentsFromTracks(analysis, midiTrack, gainTrack) {
   return segments;
 }
 
+function collectDistinctAutotuneSegmentsFromTracks(analysis, midiTrack, gainTrack) {
+  const segments = [];
+  let segmentStart = -1;
+  let activeMidi = null;
+  const frameCount = analysis.frameTimes.length;
+  const framePad = analysis.hopSize / analysis.sampleRate;
+  for (let i = 0; i < frameCount; i++) {
+    const midiValue = midiTrack[i];
+    if (!Number.isFinite(midiValue)) {
+      if (segmentStart >= 0) {
+        pushBendSegment(segments, analysis, midiTrack, gainTrack, segmentStart, i - 1, framePad);
+        segmentStart = -1;
+        activeMidi = null;
+      }
+      continue;
+    }
+    const discreteMidi = Math.round(midiValue);
+    if (segmentStart < 0) {
+      segmentStart = i;
+      activeMidi = discreteMidi;
+      continue;
+    }
+    if (discreteMidi !== activeMidi) {
+      pushBendSegment(segments, analysis, midiTrack, gainTrack, segmentStart, i - 1, framePad);
+      segmentStart = i;
+      activeMidi = discreteMidi;
+    }
+  }
+  if (segmentStart >= 0) {
+    pushBendSegment(segments, analysis, midiTrack, gainTrack, segmentStart, frameCount - 1, framePad);
+  }
+  return segments;
+}
+
 function pushBendSegment(segments, analysis, midiTrack, gainTrack, startFrame, endFrame, framePad) {
   const startTime = Math.max(0, analysis.frameTimes[startFrame] - framePad);
   const endTime = Math.min(analysis.duration, analysis.frameTimes[endFrame] + framePad);
@@ -3848,6 +4375,10 @@ function pushBendSegment(segments, analysis, midiTrack, gainTrack, startFrame, e
 
 function triggerBendVoice(ctx, segment, startAt, destination, synthSettings) {
   const settings = synthSettings || readPlaybackSynthSettingsFromUi();
+  if (settings.playbackDevice === "sampler") {
+    triggerSamplerBendVoice(ctx, segment, startAt, destination, settings);
+    return;
+  }
   const start = startAt + segment.startTime;
   const end = startAt + segment.endTime;
   const useAmpEnvelope = !settings.followOriginalAmplitude;

@@ -262,6 +262,33 @@ button:disabled {
   accent-color: var(--accent);
 }
 
+.auto-articulation-toggle {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid rgba(92, 195, 255, 0.26);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.auto-articulation-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28rem;
+  font-size: 0.76rem;
+  color: var(--ink-muted);
+  padding: 0.16rem 0.48rem;
+  background: rgba(9, 27, 34, 0.48);
+}
+
+.auto-articulation-option + .auto-articulation-option {
+  border-left: 1px solid rgba(92, 195, 255, 0.22);
+}
+
+.auto-articulation-option input[type="radio"] {
+  margin: 0;
+  accent-color: var(--accent);
+}
+
 .selection-panel {
   margin-top: 0.15rem;
 }
@@ -297,6 +324,51 @@ button:disabled {
   margin-top: 0.55rem;
 }
 
+.device-mode-group {
+  display: inline-grid;
+  grid-template-columns: repeat(2, minmax(96px, 1fr));
+  border: 1px solid rgba(92, 195, 255, 0.28);
+  border-radius: 999px;
+  overflow: hidden;
+  margin-bottom: 0.72rem;
+}
+
+.device-mode-option {
+  position: relative;
+  margin: 0;
+  font-size: 0.82rem;
+}
+
+.device-mode-option input[type="radio"] {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.device-mode-option span {
+  display: block;
+  text-align: center;
+  padding: 0.34rem 0.78rem;
+  background: rgba(9, 27, 34, 0.52);
+  color: var(--ink-muted);
+  border-left: 1px solid rgba(92, 195, 255, 0.24);
+  cursor: pointer;
+  user-select: none;
+}
+
+.device-mode-option:first-child span {
+  border-left: 0;
+}
+
+.device-mode-option input[type="radio"]:checked + span {
+  color: #dffaf2;
+  background: rgba(54, 190, 157, 0.22);
+}
+
+.device-mode-option.active span {
+  color: #dffaf2;
+}
+
 .synth-row-grid {
   display: grid;
   gap: 0.75rem;
@@ -311,6 +383,10 @@ button:disabled {
 
 .synth-row-filter {
   grid-template-columns: repeat(5, minmax(120px, 1fr));
+}
+
+.synth-row-sampler {
+  grid-template-columns: repeat(4, minmax(130px, 1fr));
 }
 
 .synth-row-envelope {
@@ -661,7 +737,8 @@ canvas {
   .synth-row-voice,
   .synth-row-filter,
   .synth-row-envelope,
-  .synth-row-amp-envelope {
+  .synth-row-amp-envelope,
+  .synth-row-sampler {
     grid-template-columns: repeat(2, minmax(140px, 1fr));
   }
 

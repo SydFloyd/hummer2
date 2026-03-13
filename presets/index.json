@@ -6,6 +6,7 @@
       "id": "factory-default",
       "name": "Factory Default",
       "file": "presets/factory-default.json",
+      "device": "synth",
       "owner": {
         "type": "shared",
         "id": "public"
@@ -15,6 +16,7 @@
       "id": "glass-pipe",
       "name": "Glass Pipe",
       "file": "presets/glass-pipe.json",
+      "device": "synth",
       "owner": {
         "type": "shared",
         "id": "public"
@@ -24,6 +26,7 @@
       "id": "tin-kite",
       "name": "Tin Kite",
       "file": "presets/tin-kite.json",
+      "device": "synth",
       "owner": {
         "type": "shared",
         "id": "public"
@@ -33,6 +36,17 @@
       "id": "cello",
       "name": "Cello",
       "file": "presets/cello.json",
+      "device": "synth",
+      "owner": {
+        "type": "shared",
+        "id": "public"
+      }
+    },
+    {
+      "id": "modeled-piano-synth",
+      "name": "Modeled Piano (Synth)",
+      "file": "presets/modeled-piano-synth.json",
+      "device": "synth",
       "owner": {
         "type": "shared",
         "id": "public"
@@ -42,6 +56,17 @@
       "id": "orange-leaf",
       "name": "Orange Leaf",
       "file": "presets/orange-leaf.json",
+      "device": "synth",
+      "owner": {
+        "type": "shared",
+        "id": "public"
+      }
+    },
+    {
+      "id": "sampler-piano",
+      "name": "Piano",
+      "file": "presets/sampler-piano.json",
+      "device": "sampler",
       "owner": {
         "type": "shared",
         "id": "public"

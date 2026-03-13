@@ -35,19 +35,26 @@
             <input type="radio" name="playMode" value="raw" checked>
             Raw
           </label>
-          <label class="play-mode-option">
+          <label class="play-mode-option play-mode-option-auto">
             <input type="radio" name="playMode" value="auto">
             Autotuned
           </label>
-          <label class="play-mode-option">
-            <input type="radio" name="playMode" value="original">
-            Original
-          </label>
+          <div class="auto-articulation-toggle" role="radiogroup" aria-label="Autotune articulation">
+            <label class="auto-articulation-option">
+              <input type="radio" name="autoArticulation" value="glide" checked>
+              Glide
+            </label>
+            <label class="auto-articulation-option">
+              <input type="radio" name="autoArticulation" value="distinct">
+              Distinct
+            </label>
+          </div>
         </div>
         <div class="preset-inline">
           <label class="preset-label" for="presetSelect">Presets</label>
           <select id="presetSelect" aria-label="Shared presets"></select>
         </div>
+        <button id="playOriginalBtn" class="reset-btn" type="button" aria-label="Play original recording once" title="Play original recording once" disabled>Play Original</button>
         <button id="resetDefaultsBtn" class="reset-btn" type="button" aria-label="Reset defaults" title="Reset defaults">Reset</button>
         <button
           id="toggleControlsBtn"
@@ -162,126 +169,167 @@
 
       <div class="synth-panel">
         <div class="synth-panel-header">
-          <h3 class="synth-panel-title">Playback Synth</h3>
+          <h3 class="synth-panel-title">Playback Device</h3>
           <button
             id="toggleSynthPanelBtn"
             class="icon-toggle icon-toggle-secondary"
             type="button"
-            aria-label="Expand synth settings"
+            aria-label="Expand playback device settings"
             aria-controls="synthSelectionPanel"
             aria-expanded="false"
-            title="Expand synth settings"
+            title="Expand playback device settings"
           >&#x25b8;</button>
         </div>
 
         <div id="synthSelectionPanel" class="synth-selection-panel" hidden>
-          <div class="synth-row-grid synth-row-voice">
-            <label>
-              Oscillator
-              <select id="synthOscillator">
-                <option value="sawtooth" selected>Sawtooth</option>
-                <option value="square">Square</option>
-                <option value="triangle">Triangle</option>
-                <option value="sine">Sine</option>
-              </select>
+          <div class="device-mode-group" role="radiogroup" aria-label="Playback device">
+            <label class="device-mode-option">
+              <input type="radio" name="playbackDevice" value="synth" checked>
+              <span>Synth</span>
             </label>
-            <label>
-              Voice 2 Detune (cents)
-              <input id="synthVoice2Detune" type="range" min="-40" max="40" step="1" value="8">
-              <span id="synthVoice2DetuneValue">+8</span>
+            <label class="device-mode-option">
+              <input type="radio" name="playbackDevice" value="sampler">
+              <span>Sampler</span>
             </label>
-            <label>
-              Voice 2 Mix
-              <input id="synthVoice2Mix" type="range" min="0" max="100" step="1" value="38">
-              <span id="synthVoice2MixValue">38%</span>
-            </label>
-            <label class="inline synth-voice2-toggle synth-inline-end">
-              <input id="synthVoice2Enabled" type="checkbox" checked>
-              Enable Voice 2
-            </label>
+          </div>
+
+          <div id="synthDevicePanel">
+            <div class="synth-row-grid synth-row-voice">
+              <label>
+                Oscillator
+                <select id="synthOscillator">
+                  <option value="sawtooth" selected>Sawtooth</option>
+                  <option value="square">Square</option>
+                  <option value="triangle">Triangle</option>
+                  <option value="sine">Sine</option>
+                </select>
+              </label>
+              <label>
+                Voice 2 Detune (cents)
+                <input id="synthVoice2Detune" type="range" min="-40" max="40" step="1" value="8">
+                <span id="synthVoice2DetuneValue">+8</span>
+              </label>
+              <label>
+                Voice 2 Mix
+                <input id="synthVoice2Mix" type="range" min="0" max="100" step="1" value="38">
+                <span id="synthVoice2MixValue">38%</span>
+              </label>
+              <label class="inline synth-voice2-toggle synth-inline-end">
+                <input id="synthVoice2Enabled" type="checkbox" checked>
+                Enable Voice 2
+              </label>
+            </div>
+
+            <div class="synth-row-divider"></div>
+
+            <div class="synth-row-grid synth-row-filter">
+              <label>
+                Filter Type
+                <select id="synthFilterType">
+                  <option value="none">None</option>
+                  <option value="lowpass" selected>Lowpass</option>
+                  <option value="bandpass">Bandpass</option>
+                  <option value="highpass">Highpass</option>
+                </select>
+              </label>
+              <label>
+                Filter Resonance
+                <input id="synthFilterQ" type="range" min="0.1" max="16" step="0.1" value="0.8">
+                <span id="synthFilterQValue">0.8</span>
+              </label>
+              <label>
+                Filter Cutoff (Hz)
+                <input id="synthFilterCutoff" type="range" min="250" max="7000" step="25" value="3200">
+                <span id="synthFilterCutoffValue">3200 Hz</span>
+              </label>
+              <label>
+                Keyboard Tracking
+                <input id="synthKeyboardTrackingPct" type="range" min="0" max="100" step="1" value="45">
+                <span id="synthKeyboardTrackingPctValue">45%</span>
+              </label>
+              <label>
+                Filter Env Depth
+                <input id="synthFilterEnvDepth" type="range" min="0" max="2.5" step="0.05" value="1.1">
+                <span id="synthFilterEnvDepthValue">1.10 oct</span>
+              </label>
+            </div>
+
+            <div class="synth-row-grid synth-row-envelope">
+              <label>
+                Filter Attack (ms)
+                <input id="synthAttackMs" type="range" min="1" max="300" step="1" value="14">
+                <span id="synthAttackMsValue">14</span>
+              </label>
+              <label>
+                Filter Decay (ms)
+                <input id="synthDecayMs" type="range" min="5" max="900" step="5" value="160">
+                <span id="synthDecayMsValue">160</span>
+              </label>
+              <label>
+                Filter Sustain (%)
+                <input id="synthSustainPct" type="range" min="0" max="100" step="1" value="72">
+                <span id="synthSustainPctValue">72%</span>
+              </label>
+              <label>
+                Filter Release (ms)
+                <input id="synthReleaseMs" type="range" min="10" max="1200" step="5" value="170">
+                <span id="synthReleaseMsValue">170</span>
+              </label>
+            </div>
+
+            <div class="synth-row-divider"></div>
+
+            <div class="synth-row-grid synth-row-amp-envelope">
+              <label>
+                Amp Attack (ms)
+                <input id="ampAttackMs" type="range" min="1" max="300" step="1" value="8">
+                <span id="ampAttackMsValue">8</span>
+              </label>
+              <label>
+                Amp Decay (ms)
+                <input id="ampDecayMs" type="range" min="5" max="900" step="5" value="120">
+                <span id="ampDecayMsValue">120</span>
+              </label>
+              <label>
+                Amp Sustain (%)
+                <input id="ampSustainPct" type="range" min="0" max="100" step="1" value="92">
+                <span id="ampSustainPctValue">92%</span>
+              </label>
+              <label>
+                Amp Release (ms)
+                <input id="ampReleaseMs" type="range" min="10" max="1200" step="5" value="130">
+                <span id="ampReleaseMsValue">130</span>
+              </label>
+            </div>
+          </div>
+
+          <div id="samplerDevicePanel" hidden>
+            <div class="synth-row-grid synth-row-sampler">
+              <label>
+                Sampler Instrument
+                <select id="samplerVoice">
+                  <option value="piano-custom" selected>Piano (Custom Sample)</option>
+                </select>
+              </label>
+              <label>
+                Sampler Tone (Hz)
+                <input id="samplerToneCutoff" type="range" min="500" max="9000" step="50" value="5200">
+                <span id="samplerToneCutoffValue">5200 Hz</span>
+              </label>
+              <label>
+                Sampler Start Offset (%)
+                <input id="samplerStartOffsetPct" type="range" min="0" max="30" step="1" value="2">
+                <span id="samplerStartOffsetPctValue">2%</span>
+              </label>
+              <label>
+                Sampler Release (ms)
+                <input id="samplerReleaseMs" type="range" min="20" max="1200" step="5" value="260">
+                <span id="samplerReleaseMsValue">260</span>
+              </label>
+            </div>
           </div>
 
           <div class="synth-row-divider"></div>
-
-          <div class="synth-row-grid synth-row-filter">
-            <label>
-              Filter Type
-              <select id="synthFilterType">
-                <option value="none">None</option>
-                <option value="lowpass" selected>Lowpass</option>
-                <option value="bandpass">Bandpass</option>
-                <option value="highpass">Highpass</option>
-              </select>
-            </label>
-            <label>
-              Filter Resonance
-              <input id="synthFilterQ" type="range" min="0.1" max="16" step="0.1" value="0.8">
-              <span id="synthFilterQValue">0.8</span>
-            </label>
-            <label>
-              Filter Cutoff (Hz)
-              <input id="synthFilterCutoff" type="range" min="250" max="7000" step="25" value="3200">
-              <span id="synthFilterCutoffValue">3200 Hz</span>
-            </label>
-            <label>
-              Keyboard Tracking
-              <input id="synthKeyboardTrackingPct" type="range" min="0" max="100" step="1" value="45">
-              <span id="synthKeyboardTrackingPctValue">45%</span>
-            </label>
-            <label>
-              Filter Env Depth
-              <input id="synthFilterEnvDepth" type="range" min="0" max="2.5" step="0.05" value="1.1">
-              <span id="synthFilterEnvDepthValue">1.10 oct</span>
-            </label>
-          </div>
-
-          <div class="synth-row-grid synth-row-envelope">
-            <label>
-              Filter Attack (ms)
-              <input id="synthAttackMs" type="range" min="1" max="300" step="1" value="14">
-              <span id="synthAttackMsValue">14</span>
-            </label>
-            <label>
-              Filter Decay (ms)
-              <input id="synthDecayMs" type="range" min="5" max="900" step="5" value="160">
-              <span id="synthDecayMsValue">160</span>
-            </label>
-            <label>
-              Filter Sustain (%)
-              <input id="synthSustainPct" type="range" min="0" max="100" step="1" value="72">
-              <span id="synthSustainPctValue">72%</span>
-            </label>
-            <label>
-              Filter Release (ms)
-              <input id="synthReleaseMs" type="range" min="10" max="1200" step="5" value="170">
-              <span id="synthReleaseMsValue">170</span>
-            </label>
-          </div>
-
-          <div class="synth-row-divider"></div>
-
-          <div class="synth-row-grid synth-row-amp-envelope">
-            <label>
-              Amp Attack (ms)
-              <input id="ampAttackMs" type="range" min="1" max="300" step="1" value="8">
-              <span id="ampAttackMsValue">8</span>
-            </label>
-            <label>
-              Amp Decay (ms)
-              <input id="ampDecayMs" type="range" min="5" max="900" step="5" value="120">
-              <span id="ampDecayMsValue">120</span>
-            </label>
-            <label>
-              Amp Sustain (%)
-              <input id="ampSustainPct" type="range" min="0" max="100" step="1" value="92">
-              <span id="ampSustainPctValue">92%</span>
-            </label>
-            <label>
-              Amp Release (ms)
-              <input id="ampReleaseMs" type="range" min="10" max="1200" step="5" value="130">
-              <span id="ampReleaseMsValue">130</span>
-            </label>
-          </div>
 
           <div class="synth-row-grid synth-row-dynamics">
             <label class="inline playback-toggle synth-inline-end">
@@ -293,7 +341,7 @@
               <input id="synthOutputGain" type="range" min="10" max="100" step="1" value="55">
               <span id="synthOutputGainValue">55%</span>
             </label>
-            <button id="synthTestBtn" type="button" title="Hold to test ADSR with middle C">test</button>
+            <button id="synthTestBtn" type="button" title="Hold to test playback device with middle C">test</button>
           </div>
         </div>
       </div>
