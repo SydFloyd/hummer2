@@ -27,6 +27,14 @@ const APP_CONFIG = {
     featureWindowPre: 1,
     featureWindowPost: 2
   },
+  controls: {
+    onsetSensitivity: 1.4,
+    noiseFloor: 0.11,
+    minGapMs: 90,
+    attackWeight: 0.68,
+    highWeight: 0.32,
+    rejectDistance: 2.15
+  },
   prototype: {
     maxPerClass: 5,
     captureMs: 950
@@ -56,6 +64,7 @@ const els = {
   stopBtn: document.getElementById("stopPercBtn"),
   playBtn: document.getElementById("playPercBtn"),
   clearBtn: document.getElementById("clearPercBtn"),
+  resetControlsBtn: document.getElementById("percResetControlsBtn"),
   onsetSensitivity: document.getElementById("percOnsetSensitivity"),
   onsetSensitivityValue: document.getElementById("percOnsetSensitivityValue"),
   noiseFloor: document.getElementById("percNoiseFloor"),
@@ -106,6 +115,7 @@ function wireEvents() {
   els.stopBtn.addEventListener("click", handleStopButtonPress);
   els.playBtn.addEventListener("click", playDetectedPattern);
   els.clearBtn.addEventListener("click", clearClipAndAnalysis);
+  els.resetControlsBtn.addEventListener("click", resetPercussionControls);
   els.captureKickBtn.addEventListener("click", () => startPrototypeCapture(0));
   els.captureSnareBtn.addEventListener("click", () => startPrototypeCapture(1));
   els.captureHatBtn.addEventListener("click", () => startPrototypeCapture(2));
@@ -153,6 +163,7 @@ function syncButtons() {
   els.stopBtn.disabled = !isRecording && !isPlaying;
   els.playBtn.disabled = isRecording || !hasEvents;
   els.clearBtn.disabled = !hasClip && !state.analysis;
+  els.resetControlsBtn.disabled = isRecording;
 
   const disableCalibration = isRecording || isPlaying;
   els.captureKickBtn.disabled = disableCalibration;
@@ -162,6 +173,18 @@ function syncButtons() {
   els.clearSnareBtn.disabled = disableCalibration || state.prototypes[1].length === 0;
   els.clearHatBtn.disabled = disableCalibration || state.prototypes[2].length === 0;
   els.clearAllProtoBtn.disabled = disableCalibration || totalPrototypes === 0;
+}
+
+function resetPercussionControls() {
+  els.onsetSensitivity.value = String(APP_CONFIG.controls.onsetSensitivity);
+  els.noiseFloor.value = String(APP_CONFIG.controls.noiseFloor);
+  els.minGapMs.value = String(APP_CONFIG.controls.minGapMs);
+  els.attackWeight.value = String(APP_CONFIG.controls.attackWeight);
+  els.highWeight.value = String(APP_CONFIG.controls.highWeight);
+  els.rejectDistance.value = String(APP_CONFIG.controls.rejectDistance);
+  syncControlLabels();
+  setStatus("Percussion controls reset to defaults.");
+  scheduleAutoReanalyze();
 }
 
 function setStatus(text) {
@@ -365,12 +388,12 @@ function readAnalysisSettingsFromUi() {
   const highWeight = clamp(Number(els.highWeight.value) || 0.32, 0, 1);
   const sum = Math.max(1e-6, attackWeight + highWeight);
   return {
-    onsetSensitivity: clamp(Number(els.onsetSensitivity.value) || 1.4, 0.6, 2.8),
-    noiseFloor: clamp(Number(els.noiseFloor.value) || 0.11, 0, 0.7),
-    minGapMs: clamp(Number(els.minGapMs.value) || 90, 30, 260),
+    onsetSensitivity: clamp(Number(els.onsetSensitivity.value) || APP_CONFIG.controls.onsetSensitivity, 0.6, 2.8),
+    noiseFloor: clamp(Number(els.noiseFloor.value) || APP_CONFIG.controls.noiseFloor, 0, 0.7),
+    minGapMs: clamp(Number(els.minGapMs.value) || APP_CONFIG.controls.minGapMs, 30, 260),
     attackWeight: attackWeight / sum,
     highWeight: highWeight / sum,
-    rejectDistance: clamp(Number(els.rejectDistance.value) || 2.15, 0.4, 6),
+    rejectDistance: clamp(Number(els.rejectDistance.value) || APP_CONFIG.controls.rejectDistance, 0.4, 6),
     sampleRate: APP_CONFIG.analysis.sampleRate,
     frameLength: APP_CONFIG.analysis.frameLength,
     hopLength: APP_CONFIG.analysis.hopLength
@@ -1228,11 +1251,14 @@ function renderTimeline(analysis) {
 
   const width = canvas.width;
   const height = canvas.height;
-  const pad = { left: 68, right: 20, top: 24, bottom: 28 };
+  const pad = { left: 88, right: 20, top: 18, bottom: 22 };
   const plotWidth = Math.max(1, width - pad.left - pad.right);
   const plotHeight = Math.max(1, height - pad.top - pad.bottom);
   const laneCount = CLASS_DEFS.length;
-  const laneHeight = plotHeight / laneCount;
+  const laneAreaHeight = plotHeight * 0.8;
+  const laneTop = pad.top + (plotHeight - laneAreaHeight) * 0.5;
+  const laneBottom = laneTop + laneAreaHeight;
+  const laneHeight = laneAreaHeight / laneCount;
   const duration = Math.max(analysis.durationSec, 0.1);
   const xForTime = (timeSec) => pad.left + (clamp(timeSec, 0, duration) / duration) * plotWidth;
 
@@ -1241,7 +1267,7 @@ function renderTimeline(analysis) {
   ctx.strokeStyle = "rgba(108, 205, 182, 0.22)";
   ctx.lineWidth = 1;
   for (let lane = 0; lane <= laneCount; lane++) {
-    const y = pad.top + lane * laneHeight;
+    const y = laneTop + lane * laneHeight;
     ctx.beginPath();
     ctx.moveTo(pad.left, y);
     ctx.lineTo(width - pad.right, y);
@@ -1253,8 +1279,8 @@ function renderTimeline(analysis) {
   ctx.textBaseline = "middle";
   for (let lane = 0; lane < laneCount; lane++) {
     const classId = (laneCount - 1) - lane;
-    const y = pad.top + lane * laneHeight + laneHeight * 0.5;
-    ctx.fillText(CLASS_DEFS[classId].label, 12, y);
+    const y = laneTop + lane * laneHeight + laneHeight * 0.5;
+    ctx.fillText(CLASS_DEFS[classId].label, 20, y);
   }
 
   for (const event of analysis.events) {
@@ -1263,7 +1289,7 @@ function renderTimeline(analysis) {
     }
     const lane = (laneCount - 1) - event.classId;
     const x = xForTime(event.timeSec || 0);
-    const y = pad.top + lane * laneHeight + laneHeight * 0.5;
+    const y = laneTop + lane * laneHeight + laneHeight * 0.5;
     const radius = 4 + clamp(event.confidence || 0, 0, 1) * 3.5;
     const alpha = 0.4 + clamp(event.strength || 0, 0, 1) * 0.55;
     ctx.fillStyle = withAlpha(CLASS_DEFS[event.classId].color, alpha);
@@ -1282,7 +1308,7 @@ function renderTimeline(analysis) {
       continue;
     }
     const x = xForTime(event.timeSec || 0);
-    const y = pad.top + plotHeight - 8;
+    const y = laneBottom - 8;
     ctx.strokeStyle = "#ff8f92";
     ctx.lineWidth = 1.3;
     ctx.beginPath();

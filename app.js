@@ -407,7 +407,10 @@ function wireEvents() {
   els.playSelectedBtn.addEventListener("click", () => playSelectedMode(false));
   els.loopToggleBtn.addEventListener("click", toggleLoopPlayback);
   for (const radio of els.playbackModeRadios) {
-    radio.addEventListener("change", syncPlayModeAvailability);
+    radio.addEventListener("change", () => {
+      syncPlayModeAvailability();
+      renderMidiTimeline();
+    });
   }
   els.playScaleBtn.addEventListener("click", playSelectedScale);
   els.toggleControlsBtn.addEventListener("click", toggleControlsPanel);
@@ -507,6 +510,7 @@ function wireEvents() {
   els.continuousDynamics.addEventListener("change", () => {
     syncSynthControlState();
     syncControlLabels();
+    renderMidiTimeline();
     schedulePlaybackRefresh();
   });
   els.noteDerivation.addEventListener("change", rerunDerivationAndRefreshPlayback);
@@ -548,10 +552,11 @@ function syncControlLabels() {
 }
 
 function syncScaleControlState() {
-  const autoSelected = getSelectedPlaybackMode() === "auto" && canPlayMode("auto");
-  setControlEnabled(els.scaleMode, autoSelected);
-  setControlEnabled(els.playScaleBtn, autoSelected);
-  setControlEnabled(els.scaleRoot, autoSelected && els.scaleMode.value !== "auto");
+  const isRecording = Boolean(state.mediaRecorder && state.mediaRecorder.state === "recording");
+  const enabled = !isRecording;
+  setControlEnabled(els.scaleMode, enabled);
+  setControlEnabled(els.playScaleBtn, enabled);
+  setControlEnabled(els.scaleRoot, enabled && els.scaleMode.value !== "auto");
 }
 
 function toggleControlsPanel() {
@@ -2594,6 +2599,15 @@ function renderMidiTimeline() {
   const leftPad = 44;
   const rightPad = 8;
   const innerWidth = width - leftPad - rightPad;
+  const amplitudeTrack = selectAmplitudeTimelineTrack(rawPlaybackData, autoPlaybackData);
+  const amplitudeActive = Boolean(els.continuousDynamics.checked) && getSelectedPlaybackMode() !== "original";
+
+  drawAmplitudeTimelineOverlay(ctx, state.analysis, amplitudeTrack, {
+    leftPad,
+    innerWidth,
+    height,
+    active: amplitudeActive
+  });
 
   ctx.font = "12px Space Grotesk";
   ctx.textAlign = "right";
@@ -2655,6 +2669,8 @@ function renderMidiTimeline() {
   ctx.fillText("autotuned playback track", leftPad + 128, 8);
   ctx.fillStyle = "rgba(120, 212, 255, 0.95)";
   ctx.fillText("frontend MIDI", leftPad + 310, 8);
+  ctx.fillStyle = amplitudeActive ? "rgba(255, 194, 122, 0.95)" : "rgba(255, 194, 122, 0.45)";
+  ctx.fillText("vocal amplitude", leftPad + 405, 8);
 }
 
 function drawMidiTrackPath(ctx, analysis, midiTrack, options) {
@@ -2686,6 +2702,103 @@ function drawMidiTrackPath(ctx, analysis, midiTrack, options) {
       ctx.lineTo(x, y);
     }
   }
+  ctx.stroke();
+}
+
+function selectAmplitudeTimelineTrack(rawPlaybackData, autoPlaybackData) {
+  const mode = getSelectedPlaybackMode();
+  if (mode === "auto" && autoPlaybackData && Array.isArray(autoPlaybackData.gainTrack)) {
+    return autoPlaybackData.gainTrack;
+  }
+  if (rawPlaybackData && Array.isArray(rawPlaybackData.gainTrack)) {
+    return rawPlaybackData.gainTrack;
+  }
+  if (autoPlaybackData && Array.isArray(autoPlaybackData.gainTrack)) {
+    return autoPlaybackData.gainTrack;
+  }
+  return null;
+}
+
+function drawAmplitudeTimelineOverlay(ctx, analysis, gainTrack, options) {
+  if (!Array.isArray(gainTrack) || !gainTrack.length) {
+    return;
+  }
+  const { leftPad, innerWidth, height, active } = options;
+  const bandBottom = height - 10;
+  const bandTop = Math.max(36, height - 56);
+  const bandHeight = Math.max(8, bandBottom - bandTop);
+
+  const nonZero = [];
+  for (let i = 0; i < gainTrack.length; i++) {
+    const value = gainTrack[i];
+    if (Number.isFinite(value) && value > 1e-5) {
+      nonZero.push(value);
+    }
+  }
+  if (!nonZero.length) {
+    return;
+  }
+  const reference = Math.max(0.01, percentile(nonZero, 0.95));
+
+  const segments = [];
+  let currentSegment = [];
+  for (let i = 0; i < gainTrack.length; i++) {
+    const gain = gainTrack[i];
+    if (!Number.isFinite(gain) || gain <= 1e-5) {
+      if (currentSegment.length) {
+        segments.push(currentSegment);
+        currentSegment = [];
+      }
+      continue;
+    }
+    const x = leftPad + (analysis.frameTimes[i] / analysis.duration) * innerWidth;
+    const normalized = clamp(gain / reference, 0, 1);
+    const y = bandBottom - normalized * bandHeight;
+    currentSegment.push({ x, y });
+  }
+  if (currentSegment.length) {
+    segments.push(currentSegment);
+  }
+  if (!segments.length) {
+    return;
+  }
+
+  ctx.fillStyle = active ? "rgba(255, 194, 122, 0.24)" : "rgba(255, 194, 122, 0.14)";
+  for (const segment of segments) {
+    if (segment.length === 1) {
+      const point = segment[0];
+      ctx.fillRect(point.x - 0.8, point.y, 1.6, Math.max(1, bandBottom - point.y));
+      continue;
+    }
+    ctx.beginPath();
+    ctx.moveTo(segment[0].x, bandBottom);
+    for (let i = 0; i < segment.length; i++) {
+      ctx.lineTo(segment[i].x, segment[i].y);
+    }
+    ctx.lineTo(segment[segment.length - 1].x, bandBottom);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  ctx.strokeStyle = active ? "rgba(255, 194, 122, 0.9)" : "rgba(255, 194, 122, 0.5)";
+  ctx.lineWidth = active ? 1.6 : 1.2;
+  for (const segment of segments) {
+    if (!segment.length) {
+      continue;
+    }
+    ctx.beginPath();
+    ctx.moveTo(segment[0].x, segment[0].y);
+    for (let i = 1; i < segment.length; i++) {
+      ctx.lineTo(segment[i].x, segment[i].y);
+    }
+    ctx.stroke();
+  }
+
+  ctx.strokeStyle = active ? "rgba(255, 194, 122, 0.55)" : "rgba(255, 194, 122, 0.28)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(leftPad, bandBottom);
+  ctx.lineTo(leftPad + innerWidth, bandBottom);
   ctx.stroke();
 }
 
